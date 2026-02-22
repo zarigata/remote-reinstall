@@ -248,38 +248,41 @@ show_welcome() {
 select_distro() {
     print_step "Select target distribution..."
     
-    local distros=(
-        "ubuntu"    "Ubuntu LTS         (User-friendly, great support)"
-        "debian"    "Debian Stable      (Rock-solid stability)"
-        "proxmox"   "Proxmox VE         (Virtualization platform)"
-        "fedora"    "Fedora Server      (Cutting-edge features)"
-        "rocky"     "Rocky Linux        (RHEL-compatible, enterprise)"
-        "arch"      "Arch Linux         (Rolling release, DIY)"
-        "alpine"    "Alpine Linux       (Lightweight, security-focused)"
+    local distro_keys=(ubuntu debian proxmox fedora rocky arch alpine)
+    local distro_names=(
+        "Ubuntu LTS       - User-friendly, great support"
+        "Debian Stable    - Rock-solid stability"
+        "Proxmox VE       - Virtualization platform"
+        "Fedora Server    - Cutting-edge features"
+        "Rocky Linux      - RHEL-compatible, enterprise"
+        "Arch Linux       - Rolling release, DIY"
+        "Alpine Linux     - Lightweight, security-focused"
     )
     
-    if [[ "$UI_BACKEND" == "whiptail" ]]; then
-        SELECTED_DISTRO=$(whiptail --title "Select Distribution" \
-            --menu "\nChoose the Linux distribution to install:\n" 20 70 7 \
-            "${distros[@]}" 3>&1 1>&2 2>&3)
-    elif [[ "$UI_BACKEND" == "dialog" ]]; then
-        SELECTED_DISTRO=$(dialog --title "Select Distribution" \
-            --menu "\nChoose the Linux distribution to install:\n" 20 70 7 \
-            "${distros[@]}" 3>&1 1>&2 2>&3)
-    else
-        # Text-based fallback
-        echo ""
-        echo "Available distributions:"
-        echo ""
-        local i=1
-        while [[ $i -lt ${#distros[@]} ]]; do
-            printf "  ${CYAN}%d)${NC} %-16s %s\n" "$((i/2+1))" "${distros[$i-1]}" "${distros[$i]}"
-            ((i+=2))
-        done
-        echo ""
-        read -rp "Enter selection [1-7]: " choice
-        SELECTED_DISTRO="${distros[$((choice*2-2))]}"
-    fi
+    echo ""
+    echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${WHITE}║${NC}              ${BOLD}Select Target Distribution${NC}                        ${WHITE}║${NC}"
+    echo -e "${WHITE}╠══════════════════════════════════════════════════════════════════╣${NC}"
+    
+    local i=0
+    for key in "${distro_keys[@]}"; do
+        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i+1))" "${distro_names[$i]}"
+        ((i++))
+    done
+    
+    echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    while true; do
+        read -rp "Enter your choice [1-7]: " choice
+        
+        if [[ "$choice" =~ ^[1-7]$ ]]; then
+            SELECTED_DISTRO="${distro_keys[$((choice-1))]}"
+            break
+        else
+            print_error "Invalid selection. Please enter a number between 1 and 7."
+        fi
+    done
     
     if [[ -z "$SELECTED_DISTRO" ]]; then
         die "No distribution selected"
@@ -289,81 +292,87 @@ select_distro() {
 }
 
 select_version() {
-    print_step "Select version..."
+    print_step "Select ${SELECTED_DISTRO^} version..."
     
-    local versions=()
+    local version_keys=()
+    local version_names=()
     
     case "$SELECTED_DISTRO" in
         ubuntu)
-            versions=(
-                "24.04" "Ubuntu 24.04 LTS (Noble Numbat) - Latest LTS"
-                "22.04" "Ubuntu 22.04 LTS (Jammy Jellyfish) - Previous LTS"
-                "20.04" "Ubuntu 20.04 LTS (Focal Fossa) - Legacy LTS"
+            version_keys=("24.04" "22.04" "20.04")
+            version_names=(
+                "Ubuntu 24.04 LTS (Noble Numbat) - Latest LTS"
+                "Ubuntu 22.04 LTS (Jammy Jellyfish) - Previous LTS"
+                "Ubuntu 20.04 LTS (Focal Fossa) - Legacy LTS"
             )
             ;;
         debian)
-            versions=(
-                "12"    "Debian 12 (Bookworm) - Current Stable"
-                "11"    "Debian 11 (Bullseye) - Old Stable"
+            version_keys=("12" "11")
+            version_names=(
+                "Debian 12 (Bookworm) - Current Stable"
+                "Debian 11 (Bullseye) - Old Stable"
             )
             ;;
         proxmox)
-            versions=(
-                "8"     "Proxmox VE 8.x (Based on Debian 12)"
-                "7"     "Proxmox VE 7.x (Based on Debian 11)"
+            version_keys=("8" "7")
+            version_names=(
+                "Proxmox VE 8.x (Based on Debian 12)"
+                "Proxmox VE 7.x (Based on Debian 11)"
             )
             ;;
         fedora)
-            versions=(
-                "40"    "Fedora 40 - Latest"
-                "39"    "Fedora 39 - Previous"
+            version_keys=("40" "39")
+            version_names=(
+                "Fedora 40 - Latest"
+                "Fedora 39 - Previous"
             )
             ;;
         rocky)
-            versions=(
-                "9"     "Rocky Linux 9 (RHEL 9 compatible)"
-                "8"     "Rocky Linux 8 (RHEL 8 compatible)"
+            version_keys=("9" "8")
+            version_names=(
+                "Rocky Linux 9 (RHEL 9 compatible)"
+                "Rocky Linux 8 (RHEL 8 compatible)"
             )
             ;;
         arch)
-            versions=(
-                "latest" "Arch Linux (Rolling - Latest)"
-            )
+            version_keys=("latest")
+            version_names=("Arch Linux (Rolling - Latest)")
             ;;
         alpine)
-            versions=(
-                "3.19"  "Alpine 3.19 - Latest Stable"
-                "3.18"  "Alpine 3.18 - Previous Stable"
-                "edge"  "Alpine Edge - Rolling"
+            version_keys=("3.19" "3.18" "edge")
+            version_names=(
+                "Alpine 3.19 - Latest Stable"
+                "Alpine 3.18 - Previous Stable"
+                "Alpine Edge - Rolling"
             )
             ;;
     esac
     
-    if [[ "$UI_BACKEND" == "whiptail" ]]; then
-        SELECTED_VERSION=$(whiptail --title "Select ${SELECTED_DISTRO^} Version" \
-            --menu "\nChoose the version to install:\n" 15 60 5 \
-            "${versions[@]}" 3>&1 1>&2 2>&3)
-    elif [[ "$UI_BACKEND" == "dialog" ]]; then
-        SELECTED_VERSION=$(dialog --title "Select ${SELECTED_DISTRO^} Version" \
-            --menu "\nChoose the version to install:\n" 15 60 5 \
-            "${versions[@]}" 3>&1 1>&2 2>&3)
-    else
-        echo ""
-        echo "Available versions for ${SELECTED_DISTRO^}:"
-        echo ""
-        local i=1
-        while [[ $i -lt ${#versions[@]} ]]; do
-            printf "  ${CYAN}%d)${NC} %s\n" "$((i/2+1))" "${versions[$i]}"
-            ((i+=2))
-        done
-        echo ""
-        read -rp "Enter selection: " choice
-        SELECTED_VERSION="${versions[$((choice*2-2))]}"
-    fi
+    echo ""
+    echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${WHITE}║${NC}              ${BOLD}Select ${SELECTED_DISTRO^} Version${NC}                            ${WHITE}║${NC}"
+    echo -e "${WHITE}╠══════════════════════════════════════════════════════════════════╣${NC}"
     
-    if [[ -z "$SELECTED_VERSION" ]]; then
-        die "No version selected"
-    fi
+    local i=0
+    for key in "${version_keys[@]}"; do
+        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i+1))" "${version_names[$i]}"
+        ((i++))
+    done
+    
+    echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    local max_choice=${#version_keys[@]}
+    while true; do
+        read -rp "Enter your choice [1-${max_choice}]: " choice
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "$max_choice" ]]; then
+            SELECTED_VERSION="${version_keys[$((choice-1))]}"
+            break
+        else
+            print_error "Invalid selection. Please enter a number between 1 and ${max_choice}."
+        fi
+    done
     
     print_success "Selected version: ${SELECTED_VERSION}"
 }
@@ -371,7 +380,9 @@ select_version() {
 select_disk() {
     print_step "Select installation disk..."
     
-    local disks=()
+    local disk_names=()
+    local disk_descs=()
+    
     while IFS= read -r line; do
         local name size type model
         name=$(echo "$line" | awk '{print $1}')
@@ -379,40 +390,44 @@ select_disk() {
         type=$(echo "$line" | awk '{print $3}')
         model=$(lsblk -dno MODEL "/dev/$name" 2>/dev/null | xargs)
         [[ -z "$model" ]] && model="Unknown"
-        disks+=("$name" "${size} ${type} - ${model}")
+        disk_names+=("$name")
+        disk_descs+=("/dev/$name - ${size} (${model})")
     done < <(lsblk -dno NAME,SIZE,TYPE | grep disk)
     
-    if [[ ${#disks[@]} -eq 0 ]]; then
+    if [[ ${#disk_names[@]} -eq 0 ]]; then
         die "No disks found"
     fi
     
-    if [[ "$UI_BACKEND" == "whiptail" ]]; then
-        INSTALL_DISK=$(whiptail --title "Select Installation Disk" \
-            --menu "\n⚠ WARNING: ALL DATA on selected disk will be ERASED!\n\nChoose the disk to install to:\n" 18 60 5 \
-            "${disks[@]}" 3>&1 1>&2 2>&3)
-    elif [[ "$UI_BACKEND" == "dialog" ]]; then
-        INSTALL_DISK=$(dialog --title "Select Installation Disk" \
-            --menu "\n⚠ WARNING: ALL DATA on selected disk will be ERASED!\n\nChoose the disk to install to:\n" 18 60 5 \
-            "${disks[@]}" 3>&1 1>&2 2>&3)
-    else
-        echo ""
-        echo "Available disks:"
-        echo ""
-        local i=1
-        while [[ $i -lt ${#disks[@]} ]]; do
-            printf "  ${CYAN}%d)${NC} /dev/%-8s %s\n" "$((i/2+1))" "${disks[$i-1]}" "${disks[$i]}"
-            ((i+=2))
-        done
-        echo ""
-        read -rp "Enter selection: " choice
-        INSTALL_DISK="${disks[$((choice*2-2))]}"
-    fi
+    echo ""
+    echo -e "${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║${NC}  ${BOLD}⚠ WARNING: ALL DATA ON SELECTED DISK WILL BE ERASED!${NC}           ${RED}║${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${WHITE}║${NC}              ${BOLD}Select Installation Disk${NC}                           ${WHITE}║${NC}"
+    echo -e "${WHITE}╠══════════════════════════════════════════════════════════════════╣${NC}"
     
-    if [[ -z "$INSTALL_DISK" ]]; then
-        die "No disk selected"
-    fi
+    local i=0
+    for name in "${disk_names[@]}"; do
+        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i+1))" "${disk_descs[$i]}"
+        ((i++))
+    done
     
-    INSTALL_DISK="/dev/${INSTALL_DISK}"
+    echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    local max_choice=${#disk_names[@]}
+    while true; do
+        read -rp "Enter your choice [1-${max_choice}]: " choice
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "$max_choice" ]]; then
+            INSTALL_DISK="/dev/${disk_names[$((choice-1))]}"
+            break
+        else
+            print_error "Invalid selection. Please enter a number between 1 and ${max_choice}."
+        fi
+    done
+    
     print_success "Selected disk: ${INSTALL_DISK}"
 }
 
