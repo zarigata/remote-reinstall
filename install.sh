@@ -7,7 +7,21 @@
 # ██║  ██║███████╗██║  ██║╚██████╔╝███████╗███████╗███████╗███████║╚██████╗
 # ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝╚══════╝╚══════╝ ╚═════╝
 #
-# Remote Linux Reinstaller - Transform any Linux machine into a fresh distro
+#  ███████╗ █████╗ ███████╗███████╗██╗   ██╗ ██████╗
+#  ██╔════╝██╔══██╗██╔════╝██╔════╝╚██╗ ██╔╝██╔════╝
+#  █████╗  ███████║███████╗█████╗   ╚████╔╝ ██║  ███╗
+#  ██╔══╝  ██╔══██║╚════██║██╔══╝    ╚██╔╝  ██║   ██║
+#  ███████╗██║  ██║███████║███████╗   ██║   ╚██████╔╝
+#  ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝    ╚═════╝
+#
+# ███████╗ ██████╗ █████╗  ██████╗███████╗██████╗ 
+# ██╔════╝██╔════╝██╔══██╗██╔════╝██╔════╝██╔══██╗
+# ███████╗██║     ███████║██║     █████╗  ██████╔╝
+# ╚════██║██║     ██╔══██║██║     ██╔══╝  ██╔══██╗
+# ███████║╚██████╗██║  ██║╚██████╗███████╗██║  ██║
+# ╚══════╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝╚══════╝╚═╝  ╚═╝
+#
+# Remote Linux Reinstaller - by Zarigata | FeverDream
 # Repository: https://github.com/zarigata/remote-reinstall
 # License: MIT
 #
@@ -65,15 +79,23 @@ print_banner() {
     clear
     echo -e "${CYAN}"
     cat << 'EOF'
-██████╗ ███████╗██████╗  ██████╗ ███████╗██╗     ███████╗███████╗ ██████╗
-██╔══██╗██╔════╝██╔══██╗██╔════╝ ██╔════╝██║     ██╔════╝██╔════╝██╔════╝
-██████╔╝█████╗  ██████╔╝██║  ███╗█████╗  ██║     █████╗  ███████╗██║     
-██╔══██╗██╔══╝  ██╔══██╗██║   ██║██╔══╝  ██║     ██╔══╝  ╚════██║██║     
-██║  ██║███████╗██║  ██║╚██████╔╝███████╗███████╗███████╗███████║╚██████╗
-╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝╚══════╝╚══════╝ ╚═════╝
+ ███████╗ █████╗ ███████╗███████╗██╗   ██╗ ██████╗
+ ██╔════╝██╔══██╗██╔════╝██╔════╝╚██╗ ██╔╝██╔════╝
+ █████╗  ███████║███████╗█████╗   ╚████╔╝ ██║  ███╗
+ ██╔══╝  ██╔══██║╚════██║██╔══╝    ╚██╔╝  ██║   ██║
+ ███████╗██║  ██║███████║███████╗   ██║   ╚██████╔╝
+ ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝    ╚═════╝
+
+ ███████╗ ██████╗ █████╗  ██████╗███████╗██████╗ 
+ ██╔════╝██╔════╝██╔══██╗██╔════╝██╔════╝██╔══██╗
+ ███████╗██║     ███████║██║     █████╗  ██████╔╝
+ ╚════██║██║     ██╔══██║██║     ██╔══╝  ██╔══██╗
+ ███████║╚██████╗██║  ██║╚██████╗███████╗██║  ██║
+ ╚══════╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝╚══════╝╚═╝  ╚═╝
 EOF
     echo -e "${NC}"
     echo -e "${WHITE}  Remote Linux Reinstaller v${VERSION}${NC}"
+    echo -e "${MAGENTA}  by Zarigata${NC} ${WHITE}|${NC} ${CYAN}FeverDream${NC}"
     echo -e "${YELLOW}  Transform any Linux machine into a fresh distribution${NC}"
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -646,11 +668,26 @@ run_installer() {
     print_info "This may take a while. Do not close this terminal!"
     print_info "Log file: ${LOG_FILE}"
     
+    # Check if we need to download files from GitHub (when run via curl | bash)
+    local github_raw="https://raw.githubusercontent.com/zarigata/remote-reinstall/main"
+    
+    # Download lib files if not present
+    if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+        print_info "Downloading library files from GitHub..."
+        mkdir -p "$LIB_DIR"
+        curl -fsSL "${github_raw}/lib/common.sh" -o "${LIB_DIR}/common.sh" || die "Failed to download common.sh"
+        curl -fsSL "${github_raw}/lib/partition.sh" -o "${LIB_DIR}/partition.sh" || die "Failed to download partition.sh"
+        curl -fsSL "${github_raw}/lib/network.sh" -o "${LIB_DIR}/network.sh" || die "Failed to download network.sh"
+    fi
+    
     # Source the distro-specific installer
     local installer_script="${DISTROS_DIR}/${SELECTED_DISTRO}.sh"
     
+    # Download distro installer if not present
     if [[ ! -f "$installer_script" ]]; then
-        die "Installer not found for ${SELECTED_DISTRO}: ${installer_script}"
+        print_info "Downloading ${SELECTED_DISTRO} installer from GitHub..."
+        mkdir -p "$DISTROS_DIR"
+        curl -fsSL "${github_raw}/distros/${SELECTED_DISTRO}.sh" -o "$installer_script" || die "Failed to download ${SELECTED_DISTRO}.sh"
     fi
     
     # Export configuration for the installer
