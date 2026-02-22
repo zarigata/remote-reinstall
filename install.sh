@@ -113,6 +113,30 @@ die() {
     exit 1
 }
 
+ask() {
+    local prompt="$1"
+    local varname="$2"
+    local result
+    if [[ -t 0 ]]; then
+        read -rp "$prompt" result
+    else
+        read -rp "$prompt" result < /dev/tty
+    fi
+    eval "$varname=\$result"
+}
+
+ask_secret() {
+    local prompt="$1"
+    local varname="$2"
+    local result
+    if [[ -t 0 ]]; then
+        read -rsp "$prompt" result
+    else
+        read -rsp "$prompt" result < /dev/tty
+    fi
+    eval "$varname=\$result"
+}
+
 get_input() {
     local prompt="$1"
     local var_name="$2"
