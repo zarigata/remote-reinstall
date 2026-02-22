@@ -340,8 +340,11 @@ select_distro() {
     while true; do
         if [[ -t 0 ]]; then
             read -rp "Enter your choice [1-7]: " choice
-        else
+        elif [[ -e /dev/tty && -r /dev/tty ]]; then
             read -rp "Enter your choice [1-7]: " choice < /dev/tty
+        else
+            # Fallback: try to read from stdin even if not a tty
+            read -rp "Enter your choice [1-7]: " choice || choice=""
         fi
         
         choice=$(echo "$choice" | tr -d '[:space:]')
