@@ -113,6 +113,46 @@ die() {
     exit 1
 }
 
+get_input() {
+    local prompt="$1"
+    local var_name="$2"
+    local default="$3"
+    local input
+    
+    if [[ -n "$default" ]]; then
+        prompt="${prompt} [${default}]"
+    fi
+    
+    if [[ -t 0 ]]; then
+        read -rp "$prompt: " input
+    else
+        read -rp "$prompt: " input < /dev/tty
+    fi
+    
+    input=$(echo "$input" | tr -d '[:space:]')
+    
+    if [[ -z "$input" && -n "$default" ]]; then
+        input="$default"
+    fi
+    
+    eval "$var_name=\"$input\""
+}
+
+get_password() {
+    local prompt="$1"
+    local var_name="$2"
+    local input
+    
+    if [[ -t 0 ]]; then
+        read -rsp "$prompt: " input
+    else
+        read -rsp "$prompt: " input < /dev/tty
+    fi
+    echo
+    
+    eval "$var_name=\"$input\""
+}
+
 #===================================================================================
 # DEPENDENCY CHECKS
 #===================================================================================
@@ -274,7 +314,13 @@ select_distro() {
     echo ""
     
     while true; do
-        read -rp "Enter your choice [1-7]: " choice
+        if [[ -t 0 ]]; then
+            read -rp "Enter your choice [1-7]: " choice
+        else
+            read -rp "Enter your choice [1-7]: " choice < /dev/tty
+        fi
+        
+        choice=$(echo "$choice" | tr -d '[:space:]')
         
         if [[ "$choice" =~ ^[1-7]$ ]]; then
             SELECTED_DISTRO="${distro_keys[$((choice-1))]}"
