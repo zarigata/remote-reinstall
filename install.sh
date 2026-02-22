@@ -689,6 +689,132 @@ confirm_installation() {
 }
 
 #===================================================================================
+# RAM-BASED BOOT (For single-disk systems)
+#===================================================================================
+
+RAM_DIR="/mnt/ram-boot"
+ALPINE_VERSION="3.19"
+
+download_alpine_to_ram() {
+    print_step "Downloading Alpine Linux to RAM..."
+    print_info "This enables safe installation to the boot disk"
+    
+    mkdir -p "$RAM_DIR"
+    mount -t tmpfs -o size=1G tmpfs "$RAM_DIR"
+    
+    local kernel_url="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/netboot/vmlinuz-virt"
+    local initramfs_url="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/netboot/initramfs-virt"
+    
+    print_info "Downloading Alpine kernel..."
+    curl -fsSL "$kernel_url" -o "${RAM_DIR}/vmlinuz" || die "Failed to download Alpine kernel"
+    
+    print_info "Downloading Alpine initramfs..."
+    curl -fsSL "$initramfs_url" -o "${RAM_DIR}/initramfs" || die "Failed to download Alpine initramfs"
+    
+    print_success "Alpine Linux downloaded to RAM"
+}
+
+prepare_ram_installer() {
+    print_step "Preparing RAM-based installer..."
+    
+    local github_raw="https://raw.githubusercontent.com/zarigata/remote-reinstall/main"
+    
+    mkdir -p "${RAM_DIR}/installer"
+    
+    print_info "Downloading second-stage installer..."
+    curl -fsSL "${github_raw}/ram-installer.sh" -o "${RAM_DIR}/installer/ram-installer.sh" || \
+        cp "${SCRIPT_DIR}/ram-installer.sh" "${RAM_DIR}/installer/ram-installer.sh" 2>/dev/null || \
+        die "Failed to prepare RAM installer"
+    
+    chmod +x "${RAM_DIR}/installer/ram-installer.sh"
+    
+    print_info "Saving installation configuration..."
+    cat > "${RAM_DIR}/installer/config.sh" << EOF
+export SELECTED_DISTRO="${SELECTED_DISTRO}"
+export SELECTED_VERSION="${SELECTED_VERSION}"
+export INSTALL_DISK="${INSTALL_DISK}"
+export HOSTNAME="${HOSTNAME}"
+export USERNAME="${USERNAME}"
+export PASSWORD="${PASSWORD}"
+export SSH_PORT="${SSH_PORT}"
+export SSH_KEY="${SSH_KEY}"
+export BOOT_MODE="${BOOT_MODE}"
+export ARCH="${ARCH}"
+export PRIMARY_INTERFACE="${PRIMARY_INTERFACE}"
+export PRIMARY_IP="${PRIMARY_IP}"
+EOF
+    
+    print_success "RAM installer prepared"
+}
+
+is_boot_disk() {
+    local target_disk="$1"
+    local root_partition
+    root_partition=$(findmnt -n -o SOURCE / 2>/dev/null)
+    
+    if [[ -z "$root_partition" ]]; then
+        return 1
+    fi
+    
+    local root_disk
+    root_disk=$(lsblk -no PKNAME "$root_partition" 2>/dev/null | head -1)
+    
+    local target_disk_name
+    target_disk_name=$(basename "$target_disk")
+    
+    [[ "$target_disk_name" == "$root_disk" ]]
+}
+
+boot_to_ram() {
+    print_step "Preparing to boot into RAM-based installer..."
+    
+    print_warning "This will reboot the system into a RAM-based Alpine Linux"
+    print_warning "The installation will continue automatically from there"
+    print_warning "Your SSH connection WILL be interrupted"
+    echo ""
+    echo -e "${YELLOW}The system will boot into Alpine Linux in RAM.${NC}"
+    echo -e "${YELLOW}You need to manually run the installer:${NC}"
+    echo -e "${WHITE}  sh /installer/ram-installer.sh${NC}"
+    echo ""
+    
+    if [[ "$FORCE" != "true" ]]; then
+        read -rp "Press Enter to reboot into RAM installer..." confirm
+    fi
+    
+    download_alpine_to_ram
+    prepare_ram_installer
+    
+    print_info "Loading kexec..."
+    modprobe kexec 2>/dev/null || true
+    
+    if ! command -v kexec &> /dev/null; then
+        print_info "Installing kexec-tools..."
+        apt-get install -y -qq kexec-tools 2>/dev/null || \
+        yum install -y kexec-tools 2>/dev/null || \
+        dnf install -y kexec-tools 2>/dev/null || \
+        pacman -S --noconfirm kexec-tools 2>/dev/null || \
+        die "Could not install kexec-tools"
+    fi
+    
+    print_step "Loading RAM-based kernel..."
+    
+    kexec -l "${RAM_DIR}/vmlinuz" \
+        --initrd="${RAM_DIR}/initramfs" \
+        --command-line="modules=loop,squashfs,sd-mod,usb-storage quiet alpine_repo=https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main modloop=https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/netboot/modloop-virt console=tty0 console=ttyS0,115200"
+    
+    print_success "Kernel loaded. Initiating kexec boot..."
+    sync
+    
+    print_warning "SSH connection will now be interrupted..."
+    sleep 2
+    
+    kexec -e
+    
+    die "kexec failed - should not reach here"
+}
+
+
+#===================================================================================
 # MAIN INSTALLATION FLOW
 #===================================================================================
 
@@ -696,6 +822,15 @@ run_installer() {
     print_step "Starting ${SELECTED_DISTRO^} installation..."
     print_info "This may take a while. Do not close this terminal!"
     print_info "Log file: ${LOG_FILE}"
+    
+    # Check if installing to boot disk - use RAM mode
+    if is_boot_disk "$INSTALL_DISK"; then
+        print_warning "Installing to boot disk detected!"
+        print_info "Switching to RAM-based installation mode..."
+        print_info "This will boot into Alpine Linux in RAM, then install to the disk."
+        boot_to_ram
+        return
+    fi
     
     # Check if we need to download files from GitHub (when run via curl | bash)
     local github_raw="https://raw.githubusercontent.com/zarigata/remote-reinstall/main"
