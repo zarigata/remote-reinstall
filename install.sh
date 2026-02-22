@@ -434,8 +434,12 @@ select_version() {
     
     local max_choice=${#version_keys[@]}
     while true; do
-        read -rp "Enter your choice [1-${max_choice}]: " choice
-        
+        if [[ -t 0 ]]; then
+            read -rp "Enter your choice [1-${max_choice}]: " choice
+        else
+            read -rp "Enter your choice [1-${max_choice}]: " choice < /dev/tty
+        fi
+        choice=$(echo "$choice" | tr -d '[:space:]')
         if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "$max_choice" ]]; then
             SELECTED_VERSION="${version_keys[$((choice-1))]}"
             break
@@ -488,8 +492,12 @@ select_disk() {
     
     local max_choice=${#disk_names[@]}
     while true; do
-        read -rp "Enter your choice [1-${max_choice}]: " choice
-        
+        if [[ -t 0 ]]; then
+            read -rp "Enter your choice [1-${max_choice}]: " choice
+        else
+            read -rp "Enter your choice [1-${max_choice}]: " choice < /dev/tty
+        fi
+        choice=$(echo "$choice" | tr -d '[:space:]')
         if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "$max_choice" ]]; then
             INSTALL_DISK="/dev/${disk_names[$((choice-1))]}"
             break
