@@ -482,6 +482,10 @@ select_disk() {
     local disk_names=()
     local disk_descs=()
     
+    # Get the disk where root is mounted
+    local root_disk=""
+    root_disk=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null | head -1)
+    
     while IFS= read -r line; do
         local name size type model
         name=$(echo "$line" | awk '{print $1}')
@@ -490,7 +494,13 @@ select_disk() {
         model=$(lsblk -dno MODEL "/dev/$name" 2>/dev/null | xargs)
         [[ -z "$model" ]] && model="Unknown"
         disk_names+=("$name")
-        disk_descs+=("/dev/$name - ${size} (${model})")
+        
+        # Check if this is the boot disk
+        if [[ "$name" == "$root_disk" ]]; then
+            disk_descs+=("/dev/$name - ${size} (${model}) [BOOT DISK - NOT RECOMMENDED]")
+        else
+            disk_descs+=("/dev/$name - ${size} (${model})")
+        fi
     done < <(lsblk -dno NAME,SIZE,TYPE | grep disk)
     
     if [[ ${#disk_names[@]} -eq 0 ]]; then
@@ -525,6 +535,25 @@ select_disk() {
         choice=$(echo "$choice" | tr -d '[:space:]')
         if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "$max_choice" ]]; then
             INSTALL_DISK="/dev/${disk_names[$((choice-1))]}"
+            
+            # Warn if installing to boot disk
+            if [[ "${disk_names[$((choice-1))]}" == "$root_disk" ]]; then
+                echo ""
+                echo -e "${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${RED}║${NC}  ${BOLD}⚠ CRITICAL WARNING!${NC}                                            ${RED}║${NC}"
+                echo -e "${RED}║${NC}  You selected the disk you're currently booted from!         ${RED}║${NC}"
+                echo -e "${RED}║${NC}  This is ${BOLD}NOT${NC} recommended and may cause system crash.        ${RED}║${NC}"
+                echo -e "${RED}║${NC}                                                            ${RED}║${NC}"
+                echo -e "${RED}║${NC}  ${YELLOW}For testing, use a VM with a SECOND disk.${NC}                 ${RED}║${NC}"
+                echo -e "${RED}║${NC}  ${YELLOW}For production, boot from a rescue/live USB first.${NC}         ${RED}║${NC}"
+                echo -e "${RED}╚══════════════════════════════════════════════════════════════════╝${NC}"
+                echo ""
+                read -rp "Are you SURE you want to continue? Type 'YES' to proceed: " confirm
+                if [[ "$confirm" != "YES" ]]; then
+                    print_info "Selection cancelled. Please choose another disk."
+                    continue
+                fi
+            fi
             break
         else
             print_error "Invalid selection. Please enter a number between 1 and ${max_choice}."
