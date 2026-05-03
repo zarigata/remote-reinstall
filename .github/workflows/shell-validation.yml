@@ -1,0 +1,51 @@
+name: Shell Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shell-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Verify Bash syntax
+        run: |
+          bash -n install.sh
+          bash -n ram-installer.sh
+          bash -n lib/common.sh
+          bash -n lib/network.sh
+          bash -n lib/partition.sh
+          bash -n distros/ubuntu.sh
+          bash -n distros/debian.sh
+          bash -n distros/proxmox.sh
+          bash -n distros/fedora.sh
+          bash -n distros/rocky.sh
+          bash -n distros/arch.sh
+          bash -n distros/alpine.sh
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck \
+            install.sh \
+            ram-installer.sh \
+            lib/common.sh \
+            lib/network.sh \
+            lib/partition.sh \
+            distros/ubuntu.sh \
+            distros/debian.sh \
+            distros/proxmox.sh \
+            distros/fedora.sh \
+            distros/rocky.sh \
+            distros/arch.sh \
+            distros/alpine.sh
