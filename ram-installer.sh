@@ -16,7 +16,6 @@
 
 set -o pipefail
 
-# Color definitions
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
@@ -27,19 +26,15 @@ readonly WHITE='\033[1;37m'
 readonly BOLD='\033[1m'
 readonly NC='\033[0m'
 
-# Configuration file location (passed from first stage)
-CONFIG_FILE="/tmp/reinstall-config.sh"
+CONFIG_FILE=""
 LOG_FILE="/tmp/ram-installer.log"
-
-#===================================================================================
-# LOGGING
-#===================================================================================
 
 log() {
     local level="$1"
     shift
     local message="$*"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
     echo -e "${CYAN}[$timestamp]${NC} $message"
 }
@@ -78,38 +73,74 @@ die() {
     exec /bin/sh
 }
 
-#===================================================================================
-# CONFIGURATION LOADING
-#===================================================================================
+find_config_file() {
+    local candidate
+    for candidate in /installer/config.sh /tmp/reinstall-config.sh /mnt/ram-boot/installer/config.sh; do
+        if [[ -f "$candidate" ]]; then
+            CONFIG_FILE="$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
 
 load_config() {
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        die "Configuration file not found: $CONFIG_FILE"
-    fi
-    
+    find_config_file || die "Configuration file not found in embedded installer paths"
     source "$CONFIG_FILE"
     
-    # Validate required variables
-    local required_vars=("SELECTED_DISTRO" "SELECTED_VERSION" "INSTALL_DISK" 
-                         "HOSTNAME" "USERNAME" "PASSWORD" "SSH_PORT"
+    local required_vars=("SELECTED_DISTRO" "SELECTED_VERSION" "INSTALL_DISK" \
+                         "HOSTNAME" "USERNAME" "PASSWORD" "SSH_PORT" \
                          "BOOT_MODE" "ARCH" "PRIMARY_INTERFACE" "PRIMARY_IP")
-    
+    local var
     for var in "${required_vars[@]}"; do
         if [[ -z "${!var}" ]]; then
             die "Missing required configuration: $var"
         fi
     done
     
-    print_success "Configuration loaded"
+    print_success "Configuration loaded from ${CONFIG_FILE}"
     print_info "Distribution: ${SELECTED_DISTRO} ${SELECTED_VERSION}"
     print_info "Target disk: ${INSTALL_DISK}"
     print_info "Hostname: ${HOSTNAME}"
     print_info "Network: ${PRIMARY_IP} on ${PRIMARY_INTERFACE}"
 }
 
-#===================================================================================
-# DISK OPERATIONS (Safe from RAM)
-#===================================================================================
+wait_for_network() {
+    local attempts=30
+    local attempt=1
+    
+    print_step "Waiting for live network access..."
+    while (( attempt <= attempts )); do
+        if ip -4 addr show "$PRIMARY_INTERFACE" 2>/dev/null | grep -q 'inet ' && ip route | grep -q '^default'; then
+            print_success "Network appears ready"
+            return 0
+        fi
+        print_info "Network not ready yet (${attempt}/${attempts})"
+        sleep 2
+        attempt=$((attempt + 1))
+    done
+    
+    die "Timed out waiting for network on ${PRIMARY_INTERFACE}"
+}
+
+install_runtime_dependencies() {
+    print_step "Installing live-environment dependencies..."
+    
+    apk update || die "Failed to refresh Alpine package indexes"
+    
+    local packages=(bash coreutils curl wget util-linux parted e2fsprogs dosfstools gdisk openssh)
+    case "$SELECTED_DISTRO" in
+        ubuntu|debian|proxmox)
+            packages+=(debootstrap)
+            ;;
+        alpine)
+            packages+=(tar)
+            ;;
+    esac
+    
+    apk add --no-cache "${packages[@]}" || die "Failed to install live-environment dependencies"
+    print_success "Live-environment dependencies installed"
+}
 
 wipe_disk() {
     local disk="$1"
@@ -117,16 +148,13 @@ wipe_disk() {
     print_step "Wiping disk: ${disk}"
     print_warning "ALL DATA WILL BE ERASED!"
     
-    # Unmount any existing partitions
+    local part
     for part in $(lsblk -ln -o NAME "$disk" 2>/dev/null | tail -n +2); do
         umount -f "/dev/$part" 2>/dev/null || true
     done
     
-    # Wipe partition table and filesystem signatures
     wipefs -a "$disk" 2>/dev/null || true
     sgdisk -Z "$disk" 2>/dev/null || true
-    
-    # Small delay to let kernel sync
     sleep 2
     
     print_success "Disk wiped: ${disk}"
@@ -136,18 +164,11 @@ partition_disk_bios() {
     local disk="$1"
     
     print_step "Partitioning disk (BIOS/MBR): ${disk}"
-    
-    # Create MBR partition table
     parted -s "$disk" mklabel msdos
-    
-    # Create root partition (use entire disk, leave 1MB at end)
     parted -s "$disk" mkpart primary ext4 1MiB 100%
     parted -s "$disk" set 1 boot on
-    
-    # Small delay
     sleep 2
     
-    # Format root partition
     local root_part="${disk}1"
     mkfs.ext4 -F -L "ROOT" "$root_part"
     
@@ -162,21 +183,12 @@ partition_disk_uefi() {
     local disk="$1"
     
     print_step "Partitioning disk (UEFI/GPT): ${disk}"
-    
-    # Create GPT partition table
     parted -s "$disk" mklabel gpt
-    
-    # Create EFI partition (512MB)
     parted -s "$disk" mkpart ESP fat32 1MiB 513MiB
     parted -s "$disk" set 1 esp on
-    
-    # Create root partition (rest of disk)
     parted -s "$disk" mkpart primary ext4 513MiB 100%
-    
-    # Small delay
     sleep 2
     
-    # Format partitions
     local efi_part="${disk}1"
     local root_part="${disk}2"
     
@@ -203,17 +215,11 @@ partition_disk() {
     fi
 }
 
-#===================================================================================
-# MOUNT OPERATIONS
-#===================================================================================
-
 MOUNT_ROOT="/mnt/target"
 
 mount_partitions() {
     print_step "Mounting partitions..."
-    
     mkdir -p "$MOUNT_ROOT"
-    
     mount "$ROOT_PARTITION" "$MOUNT_ROOT"
     
     if [[ "$BOOT_MODE" == "UEFI" && -n "$BOOT_PARTITION" ]]; then
@@ -226,40 +232,30 @@ mount_partitions() {
 
 unmount_partitions() {
     print_step "Unmounting partitions..."
-    
     sync
     
     if [[ "$BOOT_MODE" == "UEFI" && -n "$BOOT_PARTITION" ]]; then
         umount "${MOUNT_ROOT}/boot/efi" 2>/dev/null || true
     fi
-    
     umount "$MOUNT_ROOT" 2>/dev/null || true
     
     print_success "Partitions unmounted"
 }
-
-#===================================================================================
-# NETWORK CONFIGURATION
-#===================================================================================
 
 save_network_config() {
     local target="$1"
     
     print_step "Saving network configuration..."
     
-    # Get current network info from RAM system
     local ip_addr netmask gateway dns
-    
     ip_addr=$(ip -4 addr show "$PRIMARY_INTERFACE" | grep inet | awk '{print $2}' | cut -d/ -f1)
     netmask=$(ip -4 addr show "$PRIMARY_INTERFACE" | grep inet | awk '{print $2}' | cut -d/ -f2)
     gateway=$(ip route | grep default | awk '{print $3}')
-    dns=$(cat /etc/resolv.conf | grep nameserver | head -1 | awk '{print $2}')
+    dns=$(grep '^nameserver' /etc/resolv.conf | head -1 | awk '{print $2}')
     
-    # Create network configuration based on target distro
     case "$SELECTED_DISTRO" in
         ubuntu|debian|proxmox)
-            # Debian-style networking
-            cat > "${target}/etc/network/interfaces" << EOF
+            cat > "${target}/etc/network/interfaces" << EOF_INTERFACES
 auto lo
 iface lo inet loopback
 
@@ -268,13 +264,12 @@ iface ${PRIMARY_INTERFACE} inet static
     address ${ip_addr}/${netmask}
     gateway ${gateway}
     dns-nameservers ${dns}
-EOF
+EOF_INTERFACES
             ;;
         fedora|rocky)
-            # RHEL-style networking (NetworkManager)
             local connection_name="System ${PRIMARY_INTERFACE}"
             mkdir -p "${target}/etc/NetworkManager/system-connections"
-            cat > "${target}/etc/NetworkManager/system-connections/${connection_name}.nmconnection" << EOF
+            cat > "${target}/etc/NetworkManager/system-connections/${connection_name}.nmconnection" << EOF_NM
 [connection]
 id=${connection_name}
 type=ethernet
@@ -288,12 +283,12 @@ dns=${dns}
 
 [ipv6]
 method=disabled
-EOF
+EOF_NM
             chmod 600 "${target}/etc/NetworkManager/system-connections/${connection_name}.nmconnection"
             ;;
         arch)
-            # systemd-networkd
-            cat > "${target}/etc/systemd/network/20-wired.network" << EOF
+            mkdir -p "${target}/etc/systemd/network"
+            cat > "${target}/etc/systemd/network/20-wired.network" << EOF_NETWORKD
 [Match]
 Name=${PRIMARY_INTERFACE}
 
@@ -301,11 +296,10 @@ Name=${PRIMARY_INTERFACE}
 Address=${ip_addr}/${netmask}
 Gateway=${gateway}
 DNS=${dns}
-EOF
+EOF_NETWORKD
             ;;
         alpine)
-            # Alpine OpenRC
-            cat > "${target}/etc/network/interfaces" << EOF
+            cat > "${target}/etc/network/interfaces" << EOF_ALPINE
 auto lo
 iface lo inet loopback
 
@@ -314,7 +308,7 @@ iface ${PRIMARY_INTERFACE} inet static
     address ${ip_addr}
     netmask ${netmask}
     gateway ${gateway}
-EOF
+EOF_ALPINE
             echo "nameserver ${dns}" > "${target}/etc/resolv.conf"
             ;;
     esac
@@ -325,21 +319,14 @@ EOF
     print_info "DNS: ${dns}"
 }
 
-#===================================================================================
-# CHROOT HELPERS
-#===================================================================================
-
 setup_chroot() {
     local target="$1"
     
     print_step "Setting up chroot environment..."
-    
     mount --bind /dev "${target}/dev"
     mount --bind /dev/pts "${target}/dev/pts"
     mount --bind /proc "${target}/proc"
     mount --bind /sys "${target}/sys"
-    
-    # Copy DNS configuration
     cp /etc/resolv.conf "${target}/etc/resolv.conf"
     
     print_success "Chroot environment ready"
@@ -355,7 +342,6 @@ cleanup_chroot() {
     local target="$1"
     
     print_step "Cleaning up chroot..."
-    
     umount "${target}/sys" 2>/dev/null || true
     umount "${target}/proc" 2>/dev/null || true
     umount "${target}/dev/pts" 2>/dev/null || true
@@ -364,23 +350,13 @@ cleanup_chroot() {
     print_success "Chroot cleaned up"
 }
 
-#===================================================================================
-# USER CONFIGURATION
-#===================================================================================
-
 create_user() {
     local target="$1"
     local username="$2"
     local password="$3"
     
     print_step "Creating user: ${username}"
-    
-    # Create user with appropriate groups
-    run_chroot "$target" "useradd -m -s /bin/bash -G sudo,adm,cdrom,dip,plugdev '${username}' 2>/dev/null || \
-                         useradd -m -s /bin/bash -G wheel,adm,cdrom,dip,plugdev '${username}' 2>/dev/null || \
-                         useradd -m -s /bin/bash '${username}'"
-    
-    # Set password
+    run_chroot "$target" "useradd -m -s /bin/bash -G sudo,adm,cdrom,dip,plugdev '${username}' 2>/dev/null || useradd -m -s /bin/bash -G wheel,adm,cdrom,dip,plugdev '${username}' 2>/dev/null || useradd -m -s /bin/bash '${username}'"
     echo "${username}:${password}" | chroot "$target" chpasswd
     
     print_success "User ${username} created"
@@ -391,14 +367,12 @@ set_hostname() {
     local hostname="$2"
     
     print_step "Setting hostname: ${hostname}"
-    
     echo "$hostname" > "${target}/etc/hostname"
-    
-    cat > "${target}/etc/hosts" << EOF
+    cat > "${target}/etc/hosts" << EOF_HOSTS
 127.0.0.1   localhost
 127.0.1.1   ${hostname}
 ::1         localhost ip6-localhost ip6-loopback
-EOF
+EOF_HOSTS
     
     print_success "Hostname set to ${hostname}"
 }
@@ -410,19 +384,22 @@ configure_ssh() {
     local username="$4"
     
     print_step "Configuring SSH access..."
+    mkdir -p "${target}/etc/ssh" "${target}/home/${username}/.ssh"
     
-    mkdir -p "${target}/etc/ssh"
-    mkdir -p "${target}/home/${username}/.ssh"
-    
-    # Configure sshd
-    cat > "${target}/etc/ssh/sshd_config.d/remote-reinstall.conf" << EOF
+    if [[ -d "${target}/etc/ssh/sshd_config.d" ]]; then
+        cat > "${target}/etc/ssh/sshd_config.d/remote-reinstall.conf" << EOF_SSHD
 Port ${port}
 PermitRootLogin no
 PasswordAuthentication yes
 PubkeyAuthentication yes
-EOF
+EOF_SSHD
+    else
+        sed -i "s/^#*Port .*/Port ${port}/" "${target}/etc/ssh/sshd_config"
+        sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "${target}/etc/ssh/sshd_config"
+        sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' "${target}/etc/ssh/sshd_config"
+        sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "${target}/etc/ssh/sshd_config"
+    fi
     
-    # Add SSH key if provided
     if [[ -n "$ssh_key" ]]; then
         echo "$ssh_key" > "${target}/home/${username}/.ssh/authorized_keys"
         chmod 700 "${target}/home/${username}/.ssh"
@@ -438,20 +415,17 @@ configure_fstab() {
     local target="$1"
     
     print_step "Configuring /etc/fstab..."
-    
-    local root_uuid=$(blkid -s UUID -o value "$ROOT_PARTITION")
-    local boot_uuid=""
-    
+    local root_uuid boot_uuid
+    root_uuid=$(blkid -s UUID -o value "$ROOT_PARTITION")
+    boot_uuid=""
     [[ -n "$BOOT_PARTITION" ]] && boot_uuid=$(blkid -s UUID -o value "$BOOT_PARTITION")
     
-    cat > "${target}/etc/fstab" << EOF
+    cat > "${target}/etc/fstab" << EOF_FSTAB
 UUID=${root_uuid}  /        ext4   defaults,noatime  0 1
-EOF
-    
+EOF_FSTAB
     if [[ -n "$boot_uuid" ]]; then
         echo "UUID=${boot_uuid}  /boot/efi  vfat  defaults  0 2" >> "${target}/etc/fstab"
     fi
-    
     echo "tmpfs  /tmp  tmpfs  defaults,noatime  0 0" >> "${target}/etc/fstab"
     
     print_success "/etc/fstab configured"
@@ -462,11 +436,8 @@ install_grub() {
     local disk="$2"
     
     print_step "Installing GRUB bootloader..."
-    
     if [[ "$BOOT_MODE" == "UEFI" ]]; then
         run_chroot "$target" "grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --recheck --no-nvram"
-        
-        # Also create a fallback EFI entry
         mkdir -p "${target}/boot/efi/EFI/BOOT"
         cp "${target}/boot/efi/EFI/GRUB/grubx64.efi" "${target}/boot/efi/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
     else
@@ -479,10 +450,6 @@ install_grub() {
     print_success "GRUB installed"
 }
 
-#===================================================================================
-# DISTRIBUTION INSTALLERS
-#===================================================================================
-
 install_debian() {
     local codename
     case "$SELECTED_VERSION" in
@@ -493,47 +460,30 @@ install_debian() {
     
     print_step "Installing Debian ${SELECTED_VERSION} (${codename})..."
     print_info "This may take 10-20 minutes..."
-    
-    # Bootstrap Debian
     debootstrap --arch=amd64 --variant=minbase "$codename" "$MOUNT_ROOT" http://deb.debian.org/debian/
-    
     print_success "Base system installed"
     
-    # Configure APT
-    cat > "${MOUNT_ROOT}/etc/apt/sources.list" << EOF
+    cat > "${MOUNT_ROOT}/etc/apt/sources.list" << EOF_APT
 deb http://deb.debian.org/debian ${codename} main contrib non-free-firmware
 deb http://deb.debian.org/debian ${codename}-updates main contrib non-free-firmware
 deb http://security.debian.org/debian-security ${codename}-security main contrib non-free-firmware
-EOF
+EOF_APT
     
     setup_chroot "$MOUNT_ROOT"
-    
-    print_step "Installing kernel and essential packages..."
     run_chroot "$MOUNT_ROOT" "apt-get update"
-    run_chroot "$MOUNT_ROOT" "DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        linux-image-amd64 grub-efi-amd64 grub-pc openssh-server sudo \
-        systemd systemd-sysv locales tzdata ifupdown isc-dhcp-client iproute2 \
-        --no-install-recommends"
-    
-    # Configure locale
+    run_chroot "$MOUNT_ROOT" "DEBIAN_FRONTEND=noninteractive apt-get install -y linux-image-amd64 grub-efi-amd64 grub-pc openssh-server sudo systemd systemd-sysv locales tzdata ifupdown isc-dhcp-client iproute2 --no-install-recommends"
     run_chroot "$MOUNT_ROOT" "sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen"
     run_chroot "$MOUNT_ROOT" "locale-gen en_US.UTF-8"
     echo "LANG=en_US.UTF-8" > "${MOUNT_ROOT}/etc/default/locale"
-    
-    # Configure timezone
     run_chroot "$MOUNT_ROOT" "ln -sf /usr/share/zoneinfo/UTC /etc/localtime"
     
-    # Configure system
     set_hostname "$MOUNT_ROOT" "$HOSTNAME"
     create_user "$MOUNT_ROOT" "$USERNAME" "$PASSWORD"
     save_network_config "$MOUNT_ROOT"
     configure_ssh "$MOUNT_ROOT" "$SSH_PORT" "$SSH_KEY" "$USERNAME"
     configure_fstab "$MOUNT_ROOT"
     install_grub "$MOUNT_ROOT" "$INSTALL_DISK"
-    
-    # Enable SSH
     run_chroot "$MOUNT_ROOT" "systemctl enable ssh"
-    
     cleanup_chroot "$MOUNT_ROOT"
     
     print_success "Debian ${SELECTED_VERSION} installation complete!"
@@ -549,46 +499,32 @@ install_ubuntu() {
     esac
     
     print_step "Installing Ubuntu ${SELECTED_VERSION} (${codename})..."
-    
-    # Bootstrap Ubuntu
     debootstrap --arch=amd64 --variant=minbase "$codename" "$MOUNT_ROOT" http://archive.ubuntu.com/ubuntu/
-    
     print_success "Base system installed"
     
-    # Configure APT
-    cat > "${MOUNT_ROOT}/etc/apt/sources.list" << EOF
+    cat > "${MOUNT_ROOT}/etc/apt/sources.list" << EOF_UBUNTU_APT
 deb http://archive.ubuntu.com/ubuntu ${codename} main restricted universe multiverse
 deb http://archive.ubuntu.com/ubuntu ${codename}-updates main restricted universe multiverse
 deb http://security.ubuntu.com/ubuntu ${codename}-security main restricted universe multiverse
-EOF
+EOF_UBUNTU_APT
     
     setup_chroot "$MOUNT_ROOT"
-    
-    print_step "Installing kernel and essential packages..."
     run_chroot "$MOUNT_ROOT" "apt-get update"
-    run_chroot "$MOUNT_ROOT" "DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        linux-image-generic grub-efi-amd64 grub-pc openssh-server sudo \
-        systemd systemd-sysv locales tzdata netplan.io \
-        --no-install-recommends"
-    
-    # Configure locale and timezone
+    run_chroot "$MOUNT_ROOT" "DEBIAN_FRONTEND=noninteractive apt-get install -y linux-image-generic grub-efi-amd64 grub-pc openssh-server sudo systemd systemd-sysv locales tzdata netplan.io --no-install-recommends"
     run_chroot "$MOUNT_ROOT" "sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen"
     run_chroot "$MOUNT_ROOT" "locale-gen en_US.UTF-8"
     echo "LANG=en_US.UTF-8" > "${MOUNT_ROOT}/etc/default/locale"
     run_chroot "$MOUNT_ROOT" "ln -sf /usr/share/zoneinfo/UTC /etc/localtime"
     
-    # Configure system
     set_hostname "$MOUNT_ROOT" "$HOSTNAME"
     create_user "$MOUNT_ROOT" "$USERNAME" "$PASSWORD"
     
-    # Netplan configuration
     local ip_addr netmask gateway
     ip_addr=$(ip -4 addr show "$PRIMARY_INTERFACE" | grep inet | awk '{print $2}' | cut -d/ -f1)
     netmask=$(ip -4 addr show "$PRIMARY_INTERFACE" | grep inet | awk '{print $2}' | cut -d/ -f2)
     gateway=$(ip route | grep default | awk '{print $3}')
-    
     mkdir -p "${MOUNT_ROOT}/etc/netplan"
-    cat > "${MOUNT_ROOT}/etc/netplan/01-netcfg.yaml" << EOF
+    cat > "${MOUNT_ROOT}/etc/netplan/01-netcfg.yaml" << EOF_NETPLAN
 network:
   version: 2
   ethernets:
@@ -600,14 +536,12 @@ network:
         addresses:
           - 8.8.8.8
           - 8.8.4.4
-EOF
+EOF_NETPLAN
     
     configure_ssh "$MOUNT_ROOT" "$SSH_PORT" "$SSH_KEY" "$USERNAME"
     configure_fstab "$MOUNT_ROOT"
     install_grub "$MOUNT_ROOT" "$INSTALL_DISK"
-    
     run_chroot "$MOUNT_ROOT" "systemctl enable ssh"
-    
     cleanup_chroot "$MOUNT_ROOT"
     
     print_success "Ubuntu ${SELECTED_VERSION} installation complete!"
@@ -616,65 +550,58 @@ EOF
 install_alpine() {
     print_step "Installing Alpine ${SELECTED_VERSION}..."
     
-    # Download Alpine minirootfs
-    local alpine_version="${SELECTED_VERSION}"
-    [[ "$alpine_version" == "edge" ]] && alpine_version="latest-stable"
-    
-    local rootfs_url="https://dl-cdn.alpinelinux.org/alpine/v${alpine_version}/releases/x86_64/alpine-minirootfs-${alpine_version}.0-x86_64.tar.gz"
+    local rootfs_url repo_main repo_community
+    case "$SELECTED_VERSION" in
+        3.19|3.18)
+            rootfs_url="https://dl-cdn.alpinelinux.org/alpine/v${SELECTED_VERSION}/releases/x86_64/alpine-minirootfs-${SELECTED_VERSION}.0-x86_64.tar.gz"
+            repo_main="https://dl-cdn.alpinelinux.org/alpine/v${SELECTED_VERSION}/main"
+            repo_community="https://dl-cdn.alpinelinux.org/alpine/v${SELECTED_VERSION}/community"
+            ;;
+        edge)
+            die "Alpine edge is not yet supported from the RAM installer path"
+            ;;
+        *)
+            die "Unsupported Alpine version: ${SELECTED_VERSION}"
+            ;;
+    esac
     
     print_info "Downloading Alpine rootfs..."
-    wget -q -O /tmp/alpine-rootfs.tar.gz "$rootfs_url" || \
-        curl -sL -o /tmp/alpine-rootfs.tar.gz "$rootfs_url"
-    
-    # Extract rootfs
+    wget -q -O /tmp/alpine-rootfs.tar.gz "$rootfs_url" || curl -sL -o /tmp/alpine-rootfs.tar.gz "$rootfs_url" || die "Failed to download Alpine rootfs"
     tar -xzf /tmp/alpine-rootfs.tar.gz -C "$MOUNT_ROOT"
-    
     print_success "Base system installed"
     
-    # Configure APK repositories
-    cat > "${MOUNT_ROOT}/etc/apk/repositories" << EOF
-https://dl-cdn.alpinelinux.org/alpine/v${SELECTED_VERSION}/main
-https://dl-cdn.alpinelinux.org/alpine/v${SELECTED_VERSION}/community
-EOF
+    cat > "${MOUNT_ROOT}/etc/apk/repositories" << EOF_APK_REPOS
+${repo_main}
+${repo_community}
+EOF_APK_REPOS
     
     setup_chroot "$MOUNT_ROOT"
-    
-    print_step "Installing kernel and essential packages..."
     run_chroot "$MOUNT_ROOT" "apk update"
-    run_chroot "$MOUNT_ROOT" "apk add linux-lts grub-efi grub-bios openssh sudo openrc \
-        e2fsprogs sfdisk util-linux"
+    run_chroot "$MOUNT_ROOT" "apk add linux-lts grub-efi grub-bios openssh sudo openrc e2fsprogs util-linux"
     
-    # Configure system
     set_hostname "$MOUNT_ROOT" "$HOSTNAME"
     create_user "$MOUNT_ROOT" "$USERNAME" "$PASSWORD"
     save_network_config "$MOUNT_ROOT"
     configure_ssh "$MOUNT_ROOT" "$SSH_PORT" "$SSH_KEY" "$USERNAME"
     configure_fstab "$MOUNT_ROOT"
     install_grub "$MOUNT_ROOT" "$INSTALL_DISK"
-    
-    # Enable services
     run_chroot "$MOUNT_ROOT" "rc-update add sshd default"
     run_chroot "$MOUNT_ROOT" "rc-update add networking boot"
-    
     cleanup_chroot "$MOUNT_ROOT"
     
     print_success "Alpine ${SELECTED_VERSION} installation complete!"
 }
 
-#===================================================================================
-# MAIN FLOW
-#===================================================================================
-
 show_banner() {
     echo -e "${CYAN}"
-    cat << 'EOF'
+    cat << 'EOF_BANNER'
  ██████╗ ███████╗██████╗  ██████╗ ███████╗██╗     ███████╗███████╗ ██████╗
  ██╔══██╗██╔════╝██╔══██╗██╔════╝ ██╔════╝██║     ██╔════╝██╔════╝██╔════╝
  ██████╔╝█████╗  ██████╔╝██║  ███╗█████╗  ██║     █████╗  ███████╗██║     
  ██╔══██╗██╔══╝  ██╔══██╗██║   ██║██╔══╝  ██║     ██╔══╝  ╚════██║██║     
  ██║  ██║███████╗██║  ██║╚██████╔╝███████╗███████╗███████╗███████║╚██████╗
  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝╚══════╝╚══════╝ ╚═════╝
-EOF
+EOF_BANNER
     echo -e "${NC}"
     echo -e "${WHITE}  RAM-Based Second-Stage Installer${NC}"
     echo -e "${MAGENTA}  by Zarigata${NC} ${WHITE}|${NC} ${CYAN}FeverDream${NC}"
@@ -703,23 +630,16 @@ show_completion() {
 
 main() {
     show_banner
-    
     print_info "Starting RAM-based installation..."
     print_info "Log file: ${LOG_FILE}"
-    
-    # Initialize log
     echo "=== RAM Installer Started at $(date) ===" > "$LOG_FILE"
     
-    # Load configuration
     load_config
-    
-    # Partition the disk
+    wait_for_network
+    install_runtime_dependencies
     partition_disk "$INSTALL_DISK"
-    
-    # Mount partitions
     mount_partitions
     
-    # Run the appropriate installer
     case "$SELECTED_DISTRO" in
         debian)
             install_debian
@@ -731,22 +651,16 @@ main() {
             install_alpine
             ;;
         *)
-            die "Unsupported distribution: ${SELECTED_DISTRO}"
+            die "Unsupported distribution from RAM installer: ${SELECTED_DISTRO}"
             ;;
     esac
     
-    # Unmount
     unmount_partitions
-    
-    # Show completion and reboot
     show_completion
-    
     print_info "Rebooting in 5 seconds..."
     sleep 5
-    
     print_info "Rebooting now..."
     reboot -f
 }
 
-# Run main
 main "$@"
