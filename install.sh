@@ -51,6 +51,7 @@ PRESERVE_SSH=true
 VERBOSE=false
 FORCE=false
 UI_BACKEND=""
+INITRAMFS_PATH=""
 
 # Color definitions
 readonly RED='\033[0;31m'
@@ -78,7 +79,7 @@ log() {
 print_banner() {
     clear
     echo -e "${CYAN}"
-    cat << 'EOF'
+    cat << 'EOF_BANNER'
  ███████╗ █████╗ ███████╗███████╗██╗   ██╗ ██████╗
  ██╔════╝██╔══██╗██╔════╝██╔════╝╚██╗ ██╔╝██╔════╝
  █████╗  ███████║███████╗█████╗   ╚████╔╝ ██║  ███╗
@@ -92,7 +93,7 @@ print_banner() {
  ╚════██║██║     ██╔══██║██║     ██╔══╝  ██╔══██╗
  ███████║╚██████╗██║  ██║╚██████╗███████╗██║  ██║
  ╚══════╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝╚══════╝╚═╝  ╚═╝
-EOF
+EOF_BANNER
     echo -e "${NC}"
     echo -e "${WHITE}  Remote Linux Reinstaller v${VERSION}${NC}"
     echo -e "${MAGENTA}  by Zarigata${NC} ${WHITE}|${NC} ${CYAN}FeverDream${NC}"
@@ -250,7 +251,7 @@ check_dependencies() {
     print_step "Checking dependencies..."
     
     local missing=()
-    local required=("curl" "wget" "parted" "lsblk")
+    local required=("curl" "wget" "parted" "lsblk" "cpio" "gzip")
     
     for cmd in "${required[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
@@ -365,7 +366,6 @@ select_distro() {
         elif [[ -e /dev/tty && -r /dev/tty ]]; then
             read -rp "Enter your choice [1-7]: " choice < /dev/tty
         else
-            # Fallback: try to read from stdin even if not a tty
             read -rp "Enter your choice [1-7]: " choice || choice=""
         fi
         
@@ -481,8 +481,6 @@ select_disk() {
     
     local disk_names=()
     local disk_descs=()
-    
-    # Get the disk where root is mounted
     local root_disk=""
     root_disk=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null | head -1)
     
@@ -495,7 +493,6 @@ select_disk() {
         [[ -z "$model" ]] && model="Unknown"
         disk_names+=("$name")
         
-        # Check if this is the boot disk
         if [[ "$name" == "$root_disk" ]]; then
             disk_descs+=("/dev/$name - ${size} (${model}) [BOOT DISK - NOT RECOMMENDED]")
         else
@@ -536,7 +533,6 @@ select_disk() {
         if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "$max_choice" ]]; then
             INSTALL_DISK="/dev/${disk_names[$((choice-1))]}"
             
-            # Warn if installing to boot disk
             if [[ "${disk_names[$((choice-1))]}" == "$root_disk" ]]; then
                 echo ""
                 echo -e "${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
@@ -566,7 +562,6 @@ select_disk() {
 configure_user() {
     print_step "Configure user account..."
     
-    # Hostname
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         HOSTNAME=$(whiptail --title "Set Hostname" --inputbox "\nEnter hostname for the new system:" 10 50 "server" 3>&1 1>&2 2>&3)
     elif [[ "$UI_BACKEND" == "dialog" ]]; then
@@ -576,7 +571,6 @@ configure_user() {
         [[ -z "$HOSTNAME" ]] && HOSTNAME="server"
     fi
     
-    # Username
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         USERNAME=$(whiptail --title "Create User" --inputbox "\nEnter username for the primary user:" 10 50 "admin" 3>&1 1>&2 2>&3)
     elif [[ "$UI_BACKEND" == "dialog" ]]; then
@@ -586,7 +580,6 @@ configure_user() {
         [[ -z "$USERNAME" ]] && USERNAME="admin"
     fi
     
-    # Password
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         PASSWORD=$(whiptail --title "Set Password" --passwordbox "\nEnter password for ${USERNAME}:" 10 50 3>&1 1>&2 2>&3)
         local pass_confirm
@@ -612,7 +605,6 @@ configure_user() {
         fi
     fi
     
-    # SSH Key (optional)
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         if whiptail --title "SSH Key" --yesno "\nWould you like to add an SSH public key for authentication?" 10 50; then
             SSH_KEY=$(whiptail --title "SSH Public Key" --inputbox "\nPaste your SSH public key:" 10 70 3>&1 1>&2 2>&3)
@@ -628,7 +620,6 @@ configure_user() {
         fi
     fi
     
-    # SSH Port
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         SSH_PORT=$(whiptail --title "SSH Port" --inputbox "\nEnter SSH port:" 10 50 "22" 3>&1 1>&2 2>&3)
     elif [[ "$UI_BACKEND" == "dialog" ]]; then
@@ -718,18 +709,21 @@ prepare_ram_installer() {
     print_step "Preparing RAM-based installer..."
     
     local github_raw="https://raw.githubusercontent.com/zarigata/remote-reinstall/main"
+    local overlay_root="${RAM_DIR}/initramfs-overlay"
+    local overlay_archive="${RAM_DIR}/installer-overlay.cpio.gz"
     
-    mkdir -p "${RAM_DIR}/installer"
+    rm -rf "$overlay_root"
+    mkdir -p "${overlay_root}/installer" "${overlay_root}/etc/local.d" "${overlay_root}/etc/runlevels/default"
     
     print_info "Downloading second-stage installer..."
-    curl -fsSL "${github_raw}/ram-installer.sh" -o "${RAM_DIR}/installer/ram-installer.sh" || \
-        cp "${SCRIPT_DIR}/ram-installer.sh" "${RAM_DIR}/installer/ram-installer.sh" 2>/dev/null || \
+    curl -fsSL "${github_raw}/ram-installer.sh" -o "${overlay_root}/installer/ram-installer.sh" || \
+        cp "${SCRIPT_DIR}/ram-installer.sh" "${overlay_root}/installer/ram-installer.sh" 2>/dev/null || \
         die "Failed to prepare RAM installer"
     
-    chmod +x "${RAM_DIR}/installer/ram-installer.sh"
+    chmod 755 "${overlay_root}/installer/ram-installer.sh"
     
     print_info "Saving installation configuration..."
-    cat > "${RAM_DIR}/installer/config.sh" << EOF
+    cat > "${overlay_root}/installer/config.sh" << EOF_CONFIG
 export SELECTED_DISTRO="${SELECTED_DISTRO}"
 export SELECTED_VERSION="${SELECTED_VERSION}"
 export INSTALL_DISK="${INSTALL_DISK}"
@@ -742,9 +736,29 @@ export BOOT_MODE="${BOOT_MODE}"
 export ARCH="${ARCH}"
 export PRIMARY_INTERFACE="${PRIMARY_INTERFACE}"
 export PRIMARY_IP="${PRIMARY_IP}"
-EOF
+EOF_CONFIG
+    chmod 600 "${overlay_root}/installer/config.sh"
     
-    print_success "RAM installer prepared"
+    cat > "${overlay_root}/etc/local.d/remote-reinstall.start" << 'EOF_AUTORUN'
+#!/bin/sh
+if [ -x /installer/ram-installer.sh ]; then
+    nohup /bin/sh /installer/ram-installer.sh >/installer/autorun.log 2>&1 &
+fi
+EOF_AUTORUN
+    chmod 755 "${overlay_root}/etc/local.d/remote-reinstall.start"
+    ln -snf /etc/init.d/local "${overlay_root}/etc/runlevels/default/local"
+    
+    print_info "Embedding second-stage installer into Alpine initramfs..."
+    (
+        cd "$overlay_root" &&
+        find . -print0 | cpio --null -o -H newc 2>/dev/null | gzip -9 > "$overlay_archive"
+    ) || die "Failed to build initramfs overlay"
+    
+    cat "${RAM_DIR}/initramfs" "$overlay_archive" > "${RAM_DIR}/initramfs-patched" || \
+        die "Failed to assemble patched initramfs"
+    INITRAMFS_PATH="${RAM_DIR}/initramfs-patched"
+    
+    print_success "RAM installer prepared and embedded"
 }
 
 is_boot_disk() {
@@ -772,8 +786,8 @@ boot_to_ram() {
     print_warning "The installation will continue automatically from there"
     print_warning "Your SSH connection WILL be interrupted"
     echo ""
-    echo -e "${YELLOW}The system will boot into Alpine Linux in RAM.${NC}"
-    echo -e "${YELLOW}You need to manually run the installer:${NC}"
+    echo -e "${YELLOW}The second-stage installer will be embedded into the Alpine initramfs.${NC}"
+    echo -e "${YELLOW}If auto-start fails, run this from the Alpine console:${NC}"
     echo -e "${WHITE}  sh /installer/ram-installer.sh${NC}"
     echo ""
     
@@ -799,7 +813,7 @@ boot_to_ram() {
     print_step "Loading RAM-based kernel..."
     
     kexec -l "${RAM_DIR}/vmlinuz" \
-        --initrd="${RAM_DIR}/initramfs" \
+        --initrd="${INITRAMFS_PATH:-${RAM_DIR}/initramfs}" \
         --command-line="modules=loop,squashfs,sd-mod,usb-storage quiet alpine_repo=https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main modloop=https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/netboot/modloop-virt console=tty0 console=ttyS0,115200"
     
     print_success "Kernel loaded. Initiating kexec boot..."
@@ -813,7 +827,6 @@ boot_to_ram() {
     die "kexec failed - should not reach here"
 }
 
-
 #===================================================================================
 # MAIN INSTALLATION FLOW
 #===================================================================================
@@ -823,7 +836,6 @@ run_installer() {
     print_info "This may take a while. Do not close this terminal!"
     print_info "Log file: ${LOG_FILE}"
     
-    # Check if installing to boot disk - use RAM mode
     if is_boot_disk "$INSTALL_DISK"; then
         print_warning "Installing to boot disk detected!"
         print_info "Switching to RAM-based installation mode..."
@@ -832,10 +844,8 @@ run_installer() {
         return
     fi
     
-    # Check if we need to download files from GitHub (when run via curl | bash)
     local github_raw="https://raw.githubusercontent.com/zarigata/remote-reinstall/main"
     
-    # Download lib files if not present
     if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
         print_info "Downloading library files from GitHub..."
         mkdir -p "$LIB_DIR"
@@ -844,24 +854,18 @@ run_installer() {
         curl -fsSL "${github_raw}/lib/network.sh" -o "${LIB_DIR}/network.sh" || die "Failed to download network.sh"
     fi
     
-    # Source the distro-specific installer
     local installer_script="${DISTROS_DIR}/${SELECTED_DISTRO}.sh"
     
-    # Download distro installer if not present
     if [[ ! -f "$installer_script" ]]; then
         print_info "Downloading ${SELECTED_DISTRO} installer from GitHub..."
         mkdir -p "$DISTROS_DIR"
         curl -fsSL "${github_raw}/distros/${SELECTED_DISTRO}.sh" -o "$installer_script" || die "Failed to download ${SELECTED_DISTRO}.sh"
     fi
     
-    # Export configuration for the installer
     export INSTALL_DISK SELECTED_VERSION HOSTNAME USERNAME PASSWORD SSH_PORT SSH_KEY
     export BOOT_MODE ARCH PRIMARY_INTERFACE PRIMARY_IP LOG_FILE
     
-    # Run the installer
     source "$installer_script"
-    
-    # Run the main installation function
     install_"${SELECTED_DISTRO}"
 }
 
@@ -893,7 +897,6 @@ show_completion() {
 #===================================================================================
 
 main() {
-    # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
             -d|--distro)
@@ -948,24 +951,19 @@ main() {
         esac
     done
     
-    # Initialize log
     echo "=== Remote Reinstall Log Started at $(date) ===" > "$LOG_FILE"
     
-    # Run checks
     check_root
     check_dependencies
     detect_system
     
-    # Interactive or non-interactive mode
     if [[ -n "$SELECTED_DISTRO" && -n "$SELECTED_VERSION" && -n "$INSTALL_DISK" ]]; then
-        # Non-interactive mode (all parameters provided)
         print_banner
         print_info "Running in non-interactive mode"
         [[ -z "$HOSTNAME" ]] && HOSTNAME="server"
         [[ -z "$USERNAME" ]] && USERNAME="admin"
         [[ -z "$SSH_PORT" ]] && SSH_PORT="22"
     else
-        # Interactive mode
         show_welcome
         select_distro
         select_version
@@ -974,15 +972,12 @@ main() {
         confirm_installation
     fi
     
-    # Run the installer
     run_installer
-    
-    # Show completion message
     show_completion
 }
 
 show_help() {
-    cat << EOF
+    cat << EOF_HELP
 Usage: install.sh [OPTIONS]
 
 Remote Linux Reinstaller - Transform any Linux machine into a fresh distribution
@@ -1009,8 +1004,7 @@ Examples:
     --hostname myserver --username admin --password secret \\
     --ssh-key "ssh-rsa AAAA..."
 
-EOF
+EOF_HELP
 }
 
-# Run main
 main "$@"
