@@ -116,10 +116,31 @@ print_info() {
     log "INFO" "$*"
 }
 
+# Keep first-stage logging resilient if a helper call slips back to camelCase.
+printInfo() {
+    print_info "$@"
+}
+
+printSuccess() {
+    print_success "$@"
+}
+
+printWarning() {
+    print_warning "$@"
+}
+
+printError() {
+    print_error "$@"
+}
+
 print_step() {
     echo ""
     echo -e "${MAGENTA}▶ $*${NC}"
     log "STEP" "$*"
+}
+
+printStep() {
+    print_step "$@"
 }
 
 die() {
@@ -780,7 +801,7 @@ run_installer() {
     fi
 
     if [[ ! -f "$installer_script" ]]; then
-        printInfo "Downloading ${SELECTED_DISTRO} installer from GitHub..."
+        print_info "Downloading ${SELECTED_DISTRO} installer from GitHub..."
         mkdir -p "$DISTROS_DIR"
         curl -fsSL "${github_raw}/distros/${SELECTED_DISTRO}.sh" -o "$installer_script" || die "Failed to download ${SELECTED_DISTRO}.sh"
     fi
@@ -915,8 +936,8 @@ Examples:
   curl -fsSL https://raw.githubusercontent.com/.../install.sh | bash
 
   # Non-interactive Ubuntu 24.04 installation
-  curl -fsSL ... | bash -s -- -d ubuntu -v 24.04 --disk /dev/sda \\
-    --hostname myserver --username admin --password secret \\
+  curl -fsSL ... | bash -s -- -d ubuntu -v 24.04 --disk /dev/sda \
+    --hostname myserver --username admin --password secret \
     --ssh-key "ssh-rsa AAAA..."
 
 EOF_HELP
