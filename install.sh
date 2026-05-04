@@ -162,7 +162,7 @@ detect_system() {
     PRIMARY_IP=$(ip -4 addr show "$PRIMARY_INTERFACE" | grep inet | awk '{print $2}' | cut -d/ -f1)
 
     print_info "Current OS: ${CURRENT_DISTRO} ${CURRENT_VERSION}"
-    printInfo "Architecture: ${ARCH}"
+    print_info "Architecture: ${ARCH}"
     print_info "Boot mode: ${BOOT_MODE}"
     print_info "Primary IP: ${PRIMARY_IP}"
     print_info "Network interface: ${PRIMARY_INTERFACE}"
@@ -780,7 +780,7 @@ run_installer() {
     fi
 
     if [[ ! -f "$installer_script" ]]; then
-        print_info "Downloading ${SELECTED_DISTRO} installer from GitHub..."
+        printInfo "Downloading ${SELECTED_DISTRO} installer from GitHub..."
         mkdir -p "$DISTROS_DIR"
         curl -fsSL "${github_raw}/distros/${SELECTED_DISTRO}.sh" -o "$installer_script" || die "Failed to download ${SELECTED_DISTRO}.sh"
     fi
