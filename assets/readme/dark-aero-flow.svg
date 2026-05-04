@@ -1,0 +1,83 @@
+<svg width="1600" height="700" viewBox="0 0 1600 700" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="113" y1="72" x2="1497" y2="644" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#050910"/>
+      <stop offset="0.45" stop-color="#102030"/>
+      <stop offset="1" stop-color="#030406"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#F4FCFF" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#DFFFF5" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="panelEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#D7FAFF" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#C9FFDE" stop-opacity="0.16"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="359" y1="0" x2="638" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#83F1FF"/>
+      <stop offset="1" stop-color="#CFFFE1"/>
+    </linearGradient>
+    <radialGradient id="g1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(265 136) rotate(56.0051) scale(267.285 219.883)">
+      <stop stop-color="#57EAFF" stop-opacity="0.68"/>
+      <stop offset="1" stop-color="#57EAFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="g2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1329 566) rotate(133.575) scale(321.649 241.338)">
+      <stop stop-color="#B0FFD1" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#B0FFD1" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="59" y="80" width="1482" height="520" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="26" stdDeviation="24" flood-color="#000814" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="700" rx="28" fill="url(#bg)"/>
+  <circle cx="265" cy="136" r="231" fill="url(#g1)"/>
+  <ellipse cx="1329" cy="566" rx="313" ry="205" fill="url(#g2)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="93" y="114" width="386" height="432" rx="34" fill="url(#panel)"/>
+    <rect x="93.75" y="114.75" width="384.5" height="430.5" rx="33.25" stroke="url(#panelEdge)" stroke-width="1.5"/>
+    <rect x="607" y="114" width="386" height="432" rx="34" fill="url(#panel)"/>
+    <rect x="607.75" y="114.75" width="384.5" height="430.5" rx="33.25" stroke="url(#panelEdge)" stroke-width="1.5"/>
+    <rect x="1121" y="114" width="386" height="432" rx="34" fill="url(#panel)"/>
+    <rect x="1121.75" y="114.75" width="384.5" height="430.5" rx="33.25" stroke="url(#panelEdge)" stroke-width="1.5"/>
+
+    <path d="M507 330H579" stroke="url(#arrow)" stroke-width="10" stroke-linecap="round"/>
+    <path d="M560 303L598 330L560 357" stroke="url(#arrow)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M1021 330H1093" stroke="url(#arrow)" stroke-width="10" stroke-linecap="round"/>
+    <path d="M1074 303L1112 330L1074 357" stroke="url(#arrow)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <circle cx="286" cy="228" r="70" fill="#07121B" fill-opacity="0.72"/>
+    <circle cx="286" cy="228" r="69.25" stroke="#A6F3FF" stroke-opacity="0.28" stroke-width="1.5"/>
+    <rect x="245" y="190" width="82" height="56" rx="12" fill="#0E2433"/>
+    <rect x="255" y="203" width="62" height="8" rx="4" fill="#C9F9FF" fill-opacity="0.34"/>
+    <rect x="255" y="218" width="36" height="8" rx="4" fill="#D6FFE2" fill-opacity="0.26"/>
+    <rect x="255" y="233" width="47" height="8" rx="4" fill="#E6FBFF" fill-opacity="0.22"/>
+    <text x="160" y="336" fill="#F6FFFF" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700">Current host</text>
+    <text x="133" y="378" fill="#DDF7FF" fill-opacity="0.76" font-family="Segoe UI, Arial, sans-serif" font-size="22">Running system detected by</text>
+    <text x="164" y="408" fill="#DDF7FF" fill-opacity="0.76" font-family="Segoe UI, Arial, sans-serif" font-size="22">install.sh over SSH</text>
+    <text x="126" y="467" fill="#C9FFE0" fill-opacity="0.68" font-family="Segoe UI, Arial, sans-serif" font-size="20">Collect distro, disk, hostname, user,</text>
+    <text x="149" y="494" fill="#C9FFE0" fill-opacity="0.68" font-family="Segoe UI, Arial, sans-serif" font-size="20">password, SSH port, and key</text>
+
+    <circle cx="800" cy="228" r="70" fill="#07121B" fill-opacity="0.72"/>
+    <circle cx="800" cy="228" r="69.25" stroke="#B7F7FF" stroke-opacity="0.28" stroke-width="1.5"/>
+    <path d="M763 227H837" stroke="#D6FBFF" stroke-width="12" stroke-linecap="round"/>
+    <path d="M800 190V264" stroke="#BFFFE2" stroke-width="12" stroke-linecap="round"/>
+    <circle cx="800" cy="228" r="48" stroke="#E9FFFF" stroke-opacity="0.18" stroke-width="1.5"/>
+    <text x="704" y="336" fill="#F6FFFF" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700">RAM handoff</text>
+    <text x="666" y="378" fill="#DDF7FF" fill-opacity="0.76" font-family="Segoe UI, Arial, sans-serif" font-size="22">Alpine netboot + initramfs overlay</text>
+    <text x="697" y="408" fill="#DDF7FF" fill-opacity="0.76" font-family="Segoe UI, Arial, sans-serif" font-size="22">loaded through kexec</text>
+    <text x="676" y="467" fill="#FFEDB9" fill-opacity="0.82" font-family="Segoe UI, Arial, sans-serif" font-size="20">This is the most important path and</text>
+    <text x="694" y="494" fill="#FFEDB9" fill-opacity="0.82" font-family="Segoe UI, Arial, sans-serif" font-size="20">still the least proven one</text>
+
+    <circle cx="1314" cy="228" r="70" fill="#07121B" fill-opacity="0.72"/>
+    <circle cx="1314" cy="228" r="69.25" stroke="#C4FFE0" stroke-opacity="0.28" stroke-width="1.5"/>
+    <path d="M1279 228L1302 251L1351 202" stroke="#D9FFF0" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="1314" cy="228" r="48" stroke="#F2FFFF" stroke-opacity="0.18" stroke-width="1.5"/>
+    <text x="1222" y="336" fill="#F6FFFF" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700">Fresh target OS</text>
+    <text x="1165" y="378" fill="#DDF7FF" fill-opacity="0.76" font-family="Segoe UI, Arial, sans-serif" font-size="22">Partition, install, configure network,</text>
+    <text x="1226" y="408" fill="#DDF7FF" fill-opacity="0.76" font-family="Segoe UI, Arial, sans-serif" font-size="22">SSH, and GRUB</text>
+    <text x="1173" y="467" fill="#C9FFE0" fill-opacity="0.68" font-family="Segoe UI, Arial, sans-serif" font-size="20">Best current fit: disposable VMs and</text>
+    <text x="1231" y="494" fill="#C9FFE0" fill-opacity="0.68" font-family="Segoe UI, Arial, sans-serif" font-size="20">careful second-disk tests</text>
+  </g>
+</svg>
