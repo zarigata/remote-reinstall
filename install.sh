@@ -30,9 +30,6 @@
 
 set -o pipefail
 
-#===================================================================================
-# GLOBAL VARIABLES
-#===================================================================================
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
@@ -53,7 +50,6 @@ FORCE=false
 UI_BACKEND=""
 INITRAMFS_PATH=""
 
-# Color definitions
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
@@ -62,17 +58,14 @@ readonly MAGENTA='\033[0;35m'
 readonly CYAN='\033[0;36m'
 readonly WHITE='\033[1;37m'
 readonly BOLD='\033[1m'
-readonly NC='\033[0m' # No Color
-
-#===================================================================================
-# UTILITY FUNCTIONS
-#===================================================================================
+readonly NC='\033[0m'
 
 log() {
     local level="$1"
     shift
     local message="$*"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
 }
 
@@ -136,74 +129,6 @@ die() {
     exit 1
 }
 
-ask() {
-    local prompt="$1"
-    local varname="$2"
-    local result
-    if [[ -t 0 ]]; then
-        read -rp "$prompt" result
-    else
-        read -rp "$prompt" result < /dev/tty
-    fi
-    eval "$varname=\$result"
-}
-
-ask_secret() {
-    local prompt="$1"
-    local varname="$2"
-    local result
-    if [[ -t 0 ]]; then
-        read -rsp "$prompt" result
-    else
-        read -rsp "$prompt" result < /dev/tty
-    fi
-    eval "$varname=\$result"
-}
-
-get_input() {
-    local prompt="$1"
-    local var_name="$2"
-    local default="$3"
-    local input
-    
-    if [[ -n "$default" ]]; then
-        prompt="${prompt} [${default}]"
-    fi
-    
-    if [[ -t 0 ]]; then
-        read -rp "$prompt: " input
-    else
-        read -rp "$prompt: " input < /dev/tty
-    fi
-    
-    input=$(echo "$input" | tr -d '[:space:]')
-    
-    if [[ -z "$input" && -n "$default" ]]; then
-        input="$default"
-    fi
-    
-    eval "$var_name=\"$input\""
-}
-
-get_password() {
-    local prompt="$1"
-    local var_name="$2"
-    local input
-    
-    if [[ -t 0 ]]; then
-        read -rsp "$prompt: " input
-    else
-        read -rsp "$prompt: " input < /dev/tty
-    fi
-    echo
-    
-    eval "$var_name=\"$input\""
-}
-
-#===================================================================================
-# DEPENDENCY CHECKS
-#===================================================================================
-
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         print_error "This script must be run as root"
@@ -215,8 +140,7 @@ check_root() {
 
 detect_system() {
     print_step "Detecting system information..."
-    
-    # Detect distribution
+
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
         CURRENT_DISTRO="${ID:-unknown}"
@@ -225,23 +149,20 @@ detect_system() {
         CURRENT_DISTRO="unknown"
         CURRENT_VERSION="unknown"
     fi
-    
-    # Detect architecture
+
     ARCH=$(uname -m)
-    
-    # Detect boot mode
+
     if [[ -d /sys/firmware/efi ]]; then
         BOOT_MODE="UEFI"
     else
         BOOT_MODE="BIOS"
     fi
-    
-    # Get network info
+
     PRIMARY_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
     PRIMARY_IP=$(ip -4 addr show "$PRIMARY_INTERFACE" | grep inet | awk '{print $2}' | cut -d/ -f1)
-    
+
     print_info "Current OS: ${CURRENT_DISTRO} ${CURRENT_VERSION}"
-    print_info "Architecture: ${ARCH}"
+    printInfo "Architecture: ${ARCH}"
     print_info "Boot mode: ${BOOT_MODE}"
     print_info "Primary IP: ${PRIMARY_IP}"
     print_info "Network interface: ${PRIMARY_INTERFACE}"
@@ -249,17 +170,17 @@ detect_system() {
 
 check_dependencies() {
     print_step "Checking dependencies..."
-    
+
     local missing=()
     local required=("curl" "wget" "parted" "lsblk" "cpio" "gzip")
-    
+    local cmd
+
     for cmd in "${required[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
             missing+=("$cmd")
         fi
     done
-    
-    # Check for UI backends
+
     if command -v whiptail &> /dev/null; then
         UI_BACKEND="whiptail"
     elif command -v dialog &> /dev/null; then
@@ -267,21 +188,21 @@ check_dependencies() {
     else
         UI_BACKEND="text"
     fi
-    
+
     print_info "UI Backend: ${UI_BACKEND}"
-    
+
     if [[ ${#missing[@]} -gt 0 ]]; then
         print_warning "Missing dependencies: ${missing[*]}"
         print_info "Attempting to install missing dependencies..."
         install_dependencies "${missing[@]}"
     fi
-    
+
     print_success "All dependencies satisfied"
 }
 
 install_dependencies() {
     local pkgs=("$@")
-    
+
     if command -v apt-get &> /dev/null; then
         apt-get update -qq
         apt-get install -y -qq "${pkgs[@]}" whiptail
@@ -296,8 +217,7 @@ install_dependencies() {
     else
         die "Unsupported package manager. Please install: ${pkgs[*]}"
     fi
-    
-    # Re-check UI backend after install
+
     if command -v whiptail &> /dev/null; then
         UI_BACKEND="whiptail"
     elif command -v dialog &> /dev/null; then
@@ -305,13 +225,9 @@ install_dependencies() {
     fi
 }
 
-#===================================================================================
-# UI FUNCTIONS
-#===================================================================================
-
 show_welcome() {
     print_banner
-    
+
     if [[ "$UI_BACKEND" == "whiptail" ]] || [[ "$UI_BACKEND" == "dialog" ]]; then
         local msg="${WHITE}Welcome to Remote Linux Reinstaller!${NC}\n\n"
         msg+="This tool will completely replace your current operating system\n"
@@ -323,7 +239,6 @@ show_welcome() {
         msg+="  • Supports multiple distributions\n"
         msg+="  • Fully automated, no physical access needed\n\n"
         msg+="${GREEN}Press Enter to continue...${NC}"
-        
         echo -e "$msg"
         read -r
     else
@@ -334,7 +249,7 @@ show_welcome() {
 
 select_distro() {
     print_step "Select target distribution..."
-    
+
     local distro_keys=(ubuntu debian proxmox fedora rocky arch alpine)
     local distro_names=(
         "Ubuntu LTS       - User-friendly, great support"
@@ -345,21 +260,22 @@ select_distro() {
         "Arch Linux       - Rolling release, DIY"
         "Alpine Linux     - Lightweight, security-focused"
     )
-    
+    local i
+
     echo ""
     echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${WHITE}║${NC}              ${BOLD}Select Target Distribution${NC}                        ${WHITE}║${NC}"
     echo -e "${WHITE}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    
-    local i=0
-    for key in "${distro_keys[@]}"; do
-        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i+1))" "${distro_names[$i]}"
-        ((i++))
+
+    i=0
+    for _ in "${distro_keys[@]}"; do
+        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i + 1))" "${distro_names[$i]}"
+        i=$((i + 1))
     done
-    
+
     echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    
+
     while true; do
         if [[ -t 0 ]]; then
             read -rp "Enter your choice [1-7]: " choice
@@ -368,30 +284,32 @@ select_distro() {
         else
             read -rp "Enter your choice [1-7]: " choice || choice=""
         fi
-        
+
         choice=$(echo "$choice" | tr -d '[:space:]')
-        
+
         if [[ "$choice" =~ ^[1-7]$ ]]; then
-            SELECTED_DISTRO="${distro_keys[$((choice-1))]}"
+            SELECTED_DISTRO="${distro_keys[$((choice - 1))]}"
             break
         else
             print_error "Invalid selection. Please enter a number between 1 and 7."
         fi
     done
-    
+
     if [[ -z "$SELECTED_DISTRO" ]]; then
         die "No distribution selected"
     fi
-    
+
     print_success "Selected: ${SELECTED_DISTRO}"
 }
 
 select_version() {
     print_step "Select ${SELECTED_DISTRO^} version..."
-    
+
     local version_keys=()
     local version_names=()
-    
+    local i
+    local max_choice
+
     case "$SELECTED_DISTRO" in
         ubuntu)
             version_keys=("24.04" "22.04" "20.04")
@@ -442,22 +360,22 @@ select_version() {
             )
             ;;
     esac
-    
+
     echo ""
     echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${WHITE}║${NC}              ${BOLD}Select ${SELECTED_DISTRO^} Version${NC}                            ${WHITE}║${NC}"
     echo -e "${WHITE}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    
-    local i=0
-    for key in "${version_keys[@]}"; do
-        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i+1))" "${version_names[$i]}"
-        ((i++))
+
+    i=0
+    for _ in "${version_keys[@]}"; do
+        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i + 1))" "${version_names[$i]}"
+        i=$((i + 1))
     done
-    
+
     echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    
-    local max_choice=${#version_keys[@]}
+
+    max_choice=${#version_keys[@]}
     while true; do
         if [[ -t 0 ]]; then
             read -rp "Enter your choice [1-${max_choice}]: " choice
@@ -466,24 +384,26 @@ select_version() {
         fi
         choice=$(echo "$choice" | tr -d '[:space:]')
         if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "$max_choice" ]]; then
-            SELECTED_VERSION="${version_keys[$((choice-1))]}"
+            SELECTED_VERSION="${version_keys[$((choice - 1))]}"
             break
         else
             print_error "Invalid selection. Please enter a number between 1 and ${max_choice}."
         fi
     done
-    
+
     print_success "Selected version: ${SELECTED_VERSION}"
 }
 
 select_disk() {
     print_step "Select installation disk..."
-    
+
     local disk_names=()
     local disk_descs=()
     local root_disk=""
+    local max_choice
+    local i
     root_disk=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null | head -1)
-    
+
     while IFS= read -r line; do
         local name size type model
         name=$(echo "$line" | awk '{print $1}')
@@ -492,18 +412,18 @@ select_disk() {
         model=$(lsblk -dno MODEL "/dev/$name" 2>/dev/null | xargs)
         [[ -z "$model" ]] && model="Unknown"
         disk_names+=("$name")
-        
+
         if [[ "$name" == "$root_disk" ]]; then
             disk_descs+=("/dev/$name - ${size} (${model}) [BOOT DISK - NOT RECOMMENDED]")
         else
             disk_descs+=("/dev/$name - ${size} (${model})")
         fi
     done < <(lsblk -dno NAME,SIZE,TYPE | grep disk)
-    
+
     if [[ ${#disk_names[@]} -eq 0 ]]; then
         die "No disks found"
     fi
-    
+
     echo ""
     echo -e "${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${RED}║${NC}  ${BOLD}⚠ WARNING: ALL DATA ON SELECTED DISK WILL BE ERASED!${NC}           ${RED}║${NC}"
@@ -512,17 +432,17 @@ select_disk() {
     echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${WHITE}║${NC}              ${BOLD}Select Installation Disk${NC}                           ${WHITE}║${NC}"
     echo -e "${WHITE}╠══════════════════════════════════════════════════════════════════╣${NC}"
-    
-    local i=0
-    for name in "${disk_names[@]}"; do
-        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i+1))" "${disk_descs[$i]}"
-        ((i++))
+
+    i=0
+    for _ in "${disk_names[@]}"; do
+        printf "${WHITE}║${NC}  ${GREEN}%d)${NC} %-65s ${WHITE}║${NC}\n" "$((i + 1))" "${disk_descs[$i]}"
+        i=$((i + 1))
     done
-    
+
     echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    
-    local max_choice=${#disk_names[@]}
+
+    max_choice=${#disk_names[@]}
     while true; do
         if [[ -t 0 ]]; then
             read -rp "Enter your choice [1-${max_choice}]: " choice
@@ -531,9 +451,9 @@ select_disk() {
         fi
         choice=$(echo "$choice" | tr -d '[:space:]')
         if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "$max_choice" ]]; then
-            INSTALL_DISK="/dev/${disk_names[$((choice-1))]}"
-            
-            if [[ "${disk_names[$((choice-1))]}" == "$root_disk" ]]; then
+            INSTALL_DISK="/dev/${disk_names[$((choice - 1))]}"
+
+            if [[ "${disk_names[$((choice - 1))]}" == "$root_disk" ]]; then
                 echo ""
                 echo -e "${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
                 echo -e "${RED}║${NC}  ${BOLD}⚠ CRITICAL WARNING!${NC}                                            ${RED}║${NC}"
@@ -555,13 +475,13 @@ select_disk() {
             print_error "Invalid selection. Please enter a number between 1 and ${max_choice}."
         fi
     done
-    
+
     print_success "Selected disk: ${INSTALL_DISK}"
 }
 
 configure_user() {
     print_step "Configure user account..."
-    
+
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         HOSTNAME=$(whiptail --title "Set Hostname" --inputbox "\nEnter hostname for the new system:" 10 50 "server" 3>&1 1>&2 2>&3)
     elif [[ "$UI_BACKEND" == "dialog" ]]; then
@@ -570,7 +490,7 @@ configure_user() {
         read -rp "Enter hostname [server]: " HOSTNAME
         [[ -z "$HOSTNAME" ]] && HOSTNAME="server"
     fi
-    
+
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         USERNAME=$(whiptail --title "Create User" --inputbox "\nEnter username for the primary user:" 10 50 "admin" 3>&1 1>&2 2>&3)
     elif [[ "$UI_BACKEND" == "dialog" ]]; then
@@ -579,7 +499,7 @@ configure_user() {
         read -rp "Enter username [admin]: " USERNAME
         [[ -z "$USERNAME" ]] && USERNAME="admin"
     fi
-    
+
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         PASSWORD=$(whiptail --title "Set Password" --passwordbox "\nEnter password for ${USERNAME}:" 10 50 3>&1 1>&2 2>&3)
         local pass_confirm
@@ -604,7 +524,7 @@ configure_user() {
             die "Passwords do not match"
         fi
     fi
-    
+
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         if whiptail --title "SSH Key" --yesno "\nWould you like to add an SSH public key for authentication?" 10 50; then
             SSH_KEY=$(whiptail --title "SSH Public Key" --inputbox "\nPaste your SSH public key:" 10 70 3>&1 1>&2 2>&3)
@@ -619,7 +539,7 @@ configure_user() {
             read -rp "Paste your SSH public key: " SSH_KEY
         fi
     fi
-    
+
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         SSH_PORT=$(whiptail --title "SSH Port" --inputbox "\nEnter SSH port:" 10 50 "22" 3>&1 1>&2 2>&3)
     elif [[ "$UI_BACKEND" == "dialog" ]]; then
@@ -628,7 +548,7 @@ configure_user() {
         read -rp "SSH port [22]: " SSH_PORT
         [[ -z "$SSH_PORT" ]] && SSH_PORT="22"
     fi
-    
+
     print_success "User configured: ${USERNAME}"
     print_success "Hostname: ${HOSTNAME}"
     print_success "SSH Port: ${SSH_PORT}"
@@ -637,7 +557,7 @@ configure_user() {
 
 confirm_installation() {
     print_step "Review installation settings..."
-    
+
     local summary="
 ╔══════════════════════════════════════════════════════════════════╗
 ║                    INSTALLATION SUMMARY                          ║
@@ -659,7 +579,7 @@ confirm_installation() {
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
 "
-    
+
     if [[ "$UI_BACKEND" == "whiptail" ]]; then
         if ! whiptail --title "Confirm Installation" --yesno "$summary" 22 70 --defaultno; then
             die "Installation cancelled by user"
@@ -675,13 +595,9 @@ confirm_installation() {
             die "Installation cancelled by user"
         fi
     fi
-    
+
     print_success "Installation confirmed"
 }
-
-#===================================================================================
-# RAM-BASED BOOT (For single-disk systems)
-#===================================================================================
 
 RAM_DIR="/mnt/ram-boot"
 ALPINE_VERSION="3.19"
@@ -689,39 +605,39 @@ ALPINE_VERSION="3.19"
 download_alpine_to_ram() {
     print_step "Downloading Alpine Linux to RAM..."
     print_info "This enables safe installation to the boot disk"
-    
+
     mkdir -p "$RAM_DIR"
     mount -t tmpfs -o size=1G tmpfs "$RAM_DIR"
-    
+
     local kernel_url="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/netboot/vmlinuz-virt"
     local initramfs_url="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/netboot/initramfs-virt"
-    
+
     print_info "Downloading Alpine kernel..."
     curl -fsSL "$kernel_url" -o "${RAM_DIR}/vmlinuz" || die "Failed to download Alpine kernel"
-    
+
     print_info "Downloading Alpine initramfs..."
     curl -fsSL "$initramfs_url" -o "${RAM_DIR}/initramfs" || die "Failed to download Alpine initramfs"
-    
+
     print_success "Alpine Linux downloaded to RAM"
 }
 
 prepare_ram_installer() {
     print_step "Preparing RAM-based installer..."
-    
+
     local github_raw="https://raw.githubusercontent.com/zarigata/remote-reinstall/main"
     local overlay_root="${RAM_DIR}/initramfs-overlay"
     local overlay_archive="${RAM_DIR}/installer-overlay.cpio.gz"
-    
+
     rm -rf "$overlay_root"
     mkdir -p "${overlay_root}/installer" "${overlay_root}/etc/local.d" "${overlay_root}/etc/runlevels/default"
-    
+
     print_info "Downloading second-stage installer..."
     curl -fsSL "${github_raw}/ram-installer.sh" -o "${overlay_root}/installer/ram-installer.sh" || \
         cp "${SCRIPT_DIR}/ram-installer.sh" "${overlay_root}/installer/ram-installer.sh" 2>/dev/null || \
         die "Failed to prepare RAM installer"
-    
+
     chmod 755 "${overlay_root}/installer/ram-installer.sh"
-    
+
     print_info "Saving installation configuration..."
     cat > "${overlay_root}/installer/config.sh" << EOF_CONFIG
 export SELECTED_DISTRO="${SELECTED_DISTRO}"
@@ -738,7 +654,7 @@ export PRIMARY_INTERFACE="${PRIMARY_INTERFACE}"
 export PRIMARY_IP="${PRIMARY_IP}"
 EOF_CONFIG
     chmod 600 "${overlay_root}/installer/config.sh"
-    
+
     cat > "${overlay_root}/etc/local.d/remote-reinstall.start" << 'EOF_AUTORUN'
 #!/bin/sh
 if [ -x /installer/ram-installer.sh ]; then
@@ -747,41 +663,50 @@ fi
 EOF_AUTORUN
     chmod 755 "${overlay_root}/etc/local.d/remote-reinstall.start"
     ln -snf /etc/init.d/local "${overlay_root}/etc/runlevels/default/local"
-    
+
     print_info "Embedding second-stage installer into Alpine initramfs..."
     (
         cd "$overlay_root" &&
         find . -print0 | cpio --null -o -H newc 2>/dev/null | gzip -9 > "$overlay_archive"
     ) || die "Failed to build initramfs overlay"
-    
+
     cat "${RAM_DIR}/initramfs" "$overlay_archive" > "${RAM_DIR}/initramfs-patched" || \
         die "Failed to assemble patched initramfs"
     INITRAMFS_PATH="${RAM_DIR}/initramfs-patched"
-    
+
     print_success "RAM installer prepared and embedded"
 }
 
 is_boot_disk() {
     local target_disk="$1"
     local root_partition
+    local root_disk
+    local target_disk_name
+
     root_partition=$(findmnt -n -o SOURCE / 2>/dev/null)
-    
     if [[ -z "$root_partition" ]]; then
         return 1
     fi
-    
-    local root_disk
+
     root_disk=$(lsblk -no PKNAME "$root_partition" 2>/dev/null | head -1)
-    
-    local target_disk_name
     target_disk_name=$(basename "$target_disk")
-    
     [[ "$target_disk_name" == "$root_disk" ]]
+}
+
+ram_stage_supports_distro() {
+    case "$1" in
+        ubuntu|debian|proxmox|alpine)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 boot_to_ram() {
     print_step "Preparing to boot into RAM-based installer..."
-    
+
     print_warning "This will reboot the system into a RAM-based Alpine Linux"
     print_warning "The installation will continue automatically from there"
     print_warning "Your SSH connection WILL be interrupted"
@@ -790,62 +715,62 @@ boot_to_ram() {
     echo -e "${YELLOW}If auto-start fails, run this from the Alpine console:${NC}"
     echo -e "${WHITE}  sh /installer/ram-installer.sh${NC}"
     echo ""
-    
+
     if [[ "$FORCE" != "true" ]]; then
         read -rp "Press Enter to reboot into RAM installer..." confirm
     fi
-    
+
     download_alpine_to_ram
     prepare_ram_installer
-    
+
     print_info "Loading kexec..."
     modprobe kexec 2>/dev/null || true
-    
+
     if ! command -v kexec &> /dev/null; then
         print_info "Installing kexec-tools..."
         apt-get install -y -qq kexec-tools 2>/dev/null || \
         yum install -y kexec-tools 2>/dev/null || \
         dnf install -y kexec-tools 2>/dev/null || \
         pacman -S --noconfirm kexec-tools 2>/dev/null || \
+        apk add kexec-tools 2>/dev/null || \
         die "Could not install kexec-tools"
     fi
-    
+
     print_step "Loading RAM-based kernel..."
-    
+
     kexec -l "${RAM_DIR}/vmlinuz" \
         --initrd="${INITRAMFS_PATH:-${RAM_DIR}/initramfs}" \
         --command-line="modules=loop,squashfs,sd-mod,usb-storage quiet alpine_repo=https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main modloop=https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/netboot/modloop-virt console=tty0 console=ttyS0,115200"
-    
+
     print_success "Kernel loaded. Initiating kexec boot..."
     sync
-    
+
     print_warning "SSH connection will now be interrupted..."
     sleep 2
-    
+
     kexec -e
-    
     die "kexec failed - should not reach here"
 }
-
-#===================================================================================
-# MAIN INSTALLATION FLOW
-#===================================================================================
 
 run_installer() {
     print_step "Starting ${SELECTED_DISTRO^} installation..."
     print_info "This may take a while. Do not close this terminal!"
     print_info "Log file: ${LOG_FILE}"
-    
+
     if is_boot_disk "$INSTALL_DISK"; then
+        if ! ram_stage_supports_distro "$SELECTED_DISTRO"; then
+            die "${SELECTED_DISTRO^} is not yet supported for boot-disk RAM reinstall mode. Use a second disk or extend ram-installer.sh first."
+        fi
         print_warning "Installing to boot disk detected!"
         print_info "Switching to RAM-based installation mode..."
         print_info "This will boot into Alpine Linux in RAM, then install to the disk."
         boot_to_ram
         return
     fi
-    
+
     local github_raw="https://raw.githubusercontent.com/zarigata/remote-reinstall/main"
-    
+    local installer_script="${DISTROS_DIR}/${SELECTED_DISTRO}.sh"
+
     if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
         print_info "Downloading library files from GitHub..."
         mkdir -p "$LIB_DIR"
@@ -853,25 +778,19 @@ run_installer() {
         curl -fsSL "${github_raw}/lib/partition.sh" -o "${LIB_DIR}/partition.sh" || die "Failed to download partition.sh"
         curl -fsSL "${github_raw}/lib/network.sh" -o "${LIB_DIR}/network.sh" || die "Failed to download network.sh"
     fi
-    
-    local installer_script="${DISTROS_DIR}/${SELECTED_DISTRO}.sh"
-    
+
     if [[ ! -f "$installer_script" ]]; then
         print_info "Downloading ${SELECTED_DISTRO} installer from GitHub..."
         mkdir -p "$DISTROS_DIR"
         curl -fsSL "${github_raw}/distros/${SELECTED_DISTRO}.sh" -o "$installer_script" || die "Failed to download ${SELECTED_DISTRO}.sh"
     fi
-    
+
     export INSTALL_DISK SELECTED_VERSION HOSTNAME USERNAME PASSWORD SSH_PORT SSH_KEY
     export BOOT_MODE ARCH PRIMARY_INTERFACE PRIMARY_IP LOG_FILE
-    
+
     source "$installer_script"
     install_"${SELECTED_DISTRO}"
 }
-
-#===================================================================================
-# POST-INSTALLATION
-#===================================================================================
 
 show_completion() {
     print_success "Installation completed successfully!"
@@ -891,10 +810,6 @@ show_completion() {
     echo -e "${GREEN}════════════════════════════════════════════════════════════════════${NC}"
     echo ""
 }
-
-#===================================================================================
-# ENTRY POINT
-#===================================================================================
 
 main() {
     while [[ $# -gt 0 ]]; do
@@ -950,13 +865,13 @@ main() {
                 ;;
         esac
     done
-    
+
     echo "=== Remote Reinstall Log Started at $(date) ===" > "$LOG_FILE"
-    
+
     check_root
     check_dependencies
     detect_system
-    
+
     if [[ -n "$SELECTED_DISTRO" && -n "$SELECTED_VERSION" && -n "$INSTALL_DISK" ]]; then
         print_banner
         print_info "Running in non-interactive mode"
@@ -971,7 +886,7 @@ main() {
         configure_user
         confirm_installation
     fi
-    
+
     run_installer
     show_completion
 }
